@@ -85,6 +85,7 @@ export class FirebaseSyncService {
       type: string
       content: string
       createdAt: Date
+      metadata?: Record<string, unknown> | null
     },
     contactMeta?: {
       name: string | null
@@ -103,6 +104,7 @@ export class FirebaseSyncService {
         type: message.type,
         content: message.content,
         createdAt: message.createdAt,
+        ...(message.metadata ? { metadata: message.metadata } : {}),
       })
 
       // 2. Conversation preview (top-level contact doc update)
@@ -267,6 +269,69 @@ export class FirebaseSyncService {
       )
     } catch (err) {
       this.handleError('markMessagesRead', err)
+    }
+  }
+
+  // ── Message status (READ, RECEIVED, PLAYED) ──────────────────────────────
+
+  async updateMessageStatus(
+    tenantId: string,
+    contactId: string,
+    messageId: string,
+    status: string,
+  ): Promise<void> {
+    if (!this.isEnabled) return
+    try {
+      await messagesRef(this.firestore!, tenantId, contactId, messageId).set(
+        { status, updatedAt: FieldValue.serverTimestamp() },
+        { merge: true },
+      )
+    } catch (err) {
+      this.handleError('updateMessageStatus', err)
+    }
+  }
+
+  // ── Contact typing indicator (from WhatsApp) ─────────────────────────────
+
+  async setContactTyping(
+    tenantId: string,
+    contactId: string,
+    isTyping: boolean,
+  ): Promise<void> {
+    if (!this.isEnabled) return
+    try {
+      await contactsRef(this.firestore!, tenantId, contactId).set(
+        {
+          contactTyping: isTyping,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      )
+    } catch (err) {
+      this.handleError('setContactTyping', err)
+    }
+  }
+
+  // ── Instance connection status ────────────────────────────────────────────
+
+  async syncInstanceStatus(
+    tenantId: string,
+    connected: boolean,
+    error?: string,
+  ): Promise<void> {
+    if (!this.isEnabled) return
+    try {
+      await this.firestore!.collection('tenants').doc(tenantId).set(
+        {
+          whatsappConnected: connected,
+          ...(error ? { whatsappError: error } : {}),
+          whatsappStatusAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      )
+    } catch (err) {
+      this.handleError('syncInstanceStatus', err)
     }
   }
 }
