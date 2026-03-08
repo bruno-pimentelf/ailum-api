@@ -19,12 +19,13 @@ async function authPlugin(fastify: FastifyInstance) {
     emailAndPassword: { enabled: true },
     advanced: {
       disableCSRFCheck: !isProd,
+      useSecureCookies: isProd,
       defaultCookieAttributes: isProd
         ? {
             sameSite: 'none',
             secure: true,
             httpOnly: true,
-            ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
+            domain: env.COOKIE_DOMAIN || undefined,
           }
         : {
             sameSite: 'lax',
@@ -32,6 +33,22 @@ async function authPlugin(fastify: FastifyInstance) {
             httpOnly: true,
           },
     },
+    ...(isProd && env.COOKIE_DOMAIN
+      ? {
+          cookies: {
+            session_token: {
+              name: 'ailum_session',
+              attributes: {
+                sameSite: 'none' as const,
+                secure: true,
+                httpOnly: true,
+                domain: env.COOKIE_DOMAIN,
+                path: '/',
+              },
+            },
+          },
+        }
+      : {}),
     plugins: [
       organization({
         async sendInvitationEmail(data) {
