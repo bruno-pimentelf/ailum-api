@@ -34,21 +34,22 @@ export function createAgentWorker(fastify: FastifyInstance) {
           },
         })
 
-        // Sync contact message to Firestore
-        await fastify.firebase.firestore
-          .collection('tenants')
-          .doc(tenantId)
-          .collection('contacts')
-          .doc(contactId)
-          .collection('messages')
-          .doc(savedMessage.id)
-          .set({
-            id: savedMessage.id,
-            role: 'CONTACT',
-            type: savedMessage.type,
-            content: savedMessage.content,
-            createdAt: savedMessage.createdAt,
-          })
+        if (fastify.firebase.firestore) {
+          await fastify.firebase.firestore
+            .collection('tenants')
+            .doc(tenantId)
+            .collection('contacts')
+            .doc(contactId)
+            .collection('messages')
+            .doc(savedMessage.id)
+            .set({
+              id: savedMessage.id,
+              role: 'CONTACT',
+              type: savedMessage.type,
+              content: savedMessage.content,
+              createdAt: savedMessage.createdAt,
+            })
+        }
 
         // Run the full orchestration pipeline
         const result = await orchestrate(messageContent, contactId, tenantId, fastify)
@@ -73,14 +74,15 @@ export function createAgentWorker(fastify: FastifyInstance) {
           fastify.log.error({ logErr }, 'agent-job:failed to write error log')
         }
 
-        // Ensure typing indicator is turned off even on failure
         try {
-          await fastify.firebase.firestore
-            .collection('tenants')
-            .doc(tenantId)
-            .collection('contacts')
-            .doc(contactId)
-            .set({ agentTyping: false, updatedAt: new Date() }, { merge: true })
+          if (fastify.firebase.firestore) {
+            await fastify.firebase.firestore
+              .collection('tenants')
+              .doc(tenantId)
+              .collection('contacts')
+              .doc(contactId)
+              .set({ agentTyping: false, updatedAt: new Date() }, { merge: true })
+          }
         } catch {
           // best effort
         }

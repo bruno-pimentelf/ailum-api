@@ -6,11 +6,17 @@ import type { Firestore } from 'firebase-admin/firestore'
 import { env } from '../config/env.js'
 
 export interface FirebaseDecorator {
-  admin: App
-  firestore: Firestore
+  admin: App | null
+  firestore: Firestore | null
 }
 
 async function firebasePlugin(fastify: FastifyInstance) {
+  if (!env.FIREBASE_PROJECT_ID || !env.FIREBASE_CLIENT_EMAIL || !env.FIREBASE_PRIVATE_KEY) {
+    fastify.log.warn('Firebase credentials not configured — Firestore sync disabled')
+    fastify.decorate('firebase', { admin: null, firestore: null })
+    return
+  }
+
   const app = admin.initializeApp({
     credential: admin.credential.cert({
       projectId: env.FIREBASE_PROJECT_ID,

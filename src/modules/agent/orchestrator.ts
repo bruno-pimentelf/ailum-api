@@ -51,12 +51,14 @@ async function setAgentTyping(
   fastify: FastifyInstance,
 ) {
   try {
-    await fastify.firebase.firestore
-      .collection('tenants')
-      .doc(tenantId)
-      .collection('contacts')
-      .doc(contactId)
-      .set({ agentTyping: typing, updatedAt: new Date() }, { merge: true })
+    if (fastify.firebase.firestore) {
+      await fastify.firebase.firestore
+        .collection('tenants')
+        .doc(tenantId)
+        .collection('contacts')
+        .doc(contactId)
+        .set({ agentTyping: typing, updatedAt: new Date() }, { merge: true })
+    }
   } catch (err) {
     fastify.log.warn({ err }, 'orchestrator:setAgentTyping:error')
   }

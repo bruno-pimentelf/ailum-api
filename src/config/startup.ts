@@ -5,46 +5,47 @@ import type { Firestore } from 'firebase-admin/firestore'
 interface StartupDeps {
   db: PrismaClient
   redis: Redis
-  firestore: Firestore
+  firestore: Firestore | null
 }
 
-/**
- * Validates all external dependencies before the server accepts traffic.
- * Throws a descriptive error if any dependency is unreachable.
- */
 export async function validateStartup(deps: StartupDeps): Promise<void> {
-  const errors: string[] = []
+  const fatal: string[] = []
+  const warnings: string[] = []
 
-  // ── PostgreSQL ─────────────────────────────────────────────────────────────
   try {
     await deps.db.$queryRaw`SELECT 1`
   } catch (err) {
-    errors.push(`PostgreSQL: ${err instanceof Error ? err.message : String(err)}`)
+    fatal.push(`PostgreSQL: ${err instanceof Error ? err.message : String(err)}`)
   }
 
-  // ── Redis ──────────────────────────────────────────────────────────────────
   try {
     const pong = await deps.redis.ping()
     if (pong !== 'PONG') {
-      errors.push('Redis: unexpected response to PING')
+      warnings.push('Redis: unexpected response to PING')
     }
   } catch (err) {
-    errors.push(`Redis: ${err instanceof Error ? err.message : String(err)}`)
+    warnings.push(`Redis: ${err instanceof Error ? err.message : String(err)}`)
   }
 
-  // ── Firebase Firestore ─────────────────────────────────────────────────────
-  try {
-    // listCollections() makes an actual gRPC call to Firestore
-    await deps.firestore.listCollections()
-  } catch (err) {
-    errors.push(`Firebase Firestore: ${err instanceof Error ? err.message : String(err)}`)
+  if (deps.firestore) {
+    try {
+      await deps.firestore.listCollections()
+    } catch (err) {
+      warnings.push(`Firebase Firestore: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  } else {
+    warnings.push('Firebase Firestore: not configured (FIREBASE_PROJECT_ID missing)')
   }
 
-  if (errors.length > 0) {
+  if (warnings.length > 0) {
+    console.warn(`⚠ Startup warnings:\n${warnings.map((w) => `  • ${w}`).join('\n')}`)
+  }
+
+  if (fatal.length > 0) {
     throw new Error(
-      `Startup validation failed — the following dependencies are unavailable:\n${errors
+      `Startup validation failed — critical dependencies unavailable:\n${fatal
         .map((e) => `  • ${e}`)
-        .join('\n')}\n\nCheck your .env and make sure all services are running.`,
+        .join('\n')}`,
     )
   }
 }

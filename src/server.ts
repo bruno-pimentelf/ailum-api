@@ -9,6 +9,7 @@ import { createMemoryConsolidationWorker } from './jobs/memory-consolidation.job
 import type { Worker } from 'bullmq'
 
 async function start() {
+  console.log('[startup] Building app…')
   const app = await buildApp()
 
   // ── Validate all external dependencies ─────────────────────────────────────
@@ -17,7 +18,7 @@ async function start() {
     await validateStartup({
       db: app.db,
       redis: app.redis,
-      firestore: app.firebase.firestore,
+      firestore: app.firebase.firestore ?? null,
     })
     app.log.info('All dependencies are healthy ✓')
   } catch (err) {
@@ -83,6 +84,7 @@ async function start() {
 }
 
 start().catch((err) => {
-  console.error('Fatal: failed to start application', err)
+  console.error('[startup] Fatal: failed to start application')
+  console.error(err)
   process.exit(1)
 })

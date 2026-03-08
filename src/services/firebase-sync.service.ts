@@ -24,12 +24,16 @@ function chargesRef(firestore: Firestore, tenantId: string, chargeId: string) {
 
 export class FirebaseSyncService {
   constructor(
-    private firestore: Firestore,
+    private firestore: Firestore | null,
     private logger?: FastifyBaseLogger,
   ) {}
 
   private handleError(operation: string, err: unknown) {
     this.logger?.error({ err }, `firebase-sync:${operation}:error`)
+  }
+
+  private get isEnabled(): boolean {
+    return this.firestore !== null
   }
 
   // ── Contact ────────────────────────────────────────────────────────────────
@@ -48,8 +52,9 @@ export class FirebaseSyncService {
       assignedProfessionalId: string | null
     },
   ): Promise<void> {
+    if (!this.isEnabled) return
     try {
-      await contactsRef(this.firestore, tenantId, contact.id).set(
+      await contactsRef(this.firestore!, tenantId, contact.id).set(
         {
           id: contact.id,
           phone: contact.phone,
@@ -87,11 +92,12 @@ export class FirebaseSyncService {
       status: string
     },
   ): Promise<void> {
+    if (!this.isEnabled) return
     try {
-      const batch = this.firestore.batch()
+      const batch = this.firestore!.batch()
 
       // 1. Message document
-      batch.set(messagesRef(this.firestore, tenantId, contactId, message.id), {
+      batch.set(messagesRef(this.firestore!, tenantId, contactId, message.id), {
         id: message.id,
         role: message.role,
         type: message.type,
@@ -101,7 +107,7 @@ export class FirebaseSyncService {
 
       // 2. Conversation preview (top-level contact doc update)
       const preview = message.content.slice(0, 100)
-      const contactDocRef = contactsRef(this.firestore, tenantId, contactId)
+      const contactDocRef = contactsRef(this.firestore!, tenantId, contactId)
 
       const previewUpdate: Record<string, unknown> = {
         lastMessage: preview,
@@ -154,8 +160,9 @@ export class FirebaseSyncService {
     stageId: string | null
     lastMessageAt: Date | null
   }): Promise<void> {
+    if (!this.isEnabled) return
     try {
-      await contactsRef(this.firestore, params.tenantId, params.contactId).set(
+      await contactsRef(this.firestore!, params.tenantId, params.contactId).set(
         {
           status: params.status,
           stageId: params.stageId,
@@ -184,8 +191,9 @@ export class FirebaseSyncService {
       notes: string | null
     },
   ): Promise<void> {
+    if (!this.isEnabled) return
     try {
-      await appointmentsRef(this.firestore, tenantId, appointment.id).set(
+      await appointmentsRef(this.firestore!, tenantId, appointment.id).set(
         {
           ...appointment,
           updatedAt: FieldValue.serverTimestamp(),
@@ -212,8 +220,9 @@ export class FirebaseSyncService {
       paidAt: Date | null
     },
   ): Promise<void> {
+    if (!this.isEnabled) return
     try {
-      await chargesRef(this.firestore, tenantId, charge.id).set(
+      await chargesRef(this.firestore!, tenantId, charge.id).set(
         {
           ...charge,
           amount: String(charge.amount),
@@ -233,8 +242,9 @@ export class FirebaseSyncService {
     contactId: string,
     isTyping: boolean,
   ): Promise<void> {
+    if (!this.isEnabled) return
     try {
-      await contactsRef(this.firestore, tenantId, contactId).set(
+      await contactsRef(this.firestore!, tenantId, contactId).set(
         {
           agentTyping: isTyping,
           updatedAt: FieldValue.serverTimestamp(),
@@ -249,8 +259,9 @@ export class FirebaseSyncService {
   // ── Mark messages read ─────────────────────────────────────────────────────
 
   async markMessagesRead(tenantId: string, contactId: string): Promise<void> {
+    if (!this.isEnabled) return
     try {
-      await contactsRef(this.firestore, tenantId, contactId).set(
+      await contactsRef(this.firestore!, tenantId, contactId).set(
         { unreadCount: 0, updatedAt: FieldValue.serverTimestamp() },
         { merge: true },
       )
