@@ -20,10 +20,10 @@ FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
-# Copy everything needed to run (including prisma CLI for migrate deploy)
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/src/generated ./src/generated
+# Overlay Prisma generated files (includes internal .js files tsc doesn't copy)
+COPY --from=builder /app/src/generated ./dist/generated
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
