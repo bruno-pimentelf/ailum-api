@@ -14,6 +14,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN DATABASE_URL="postgresql://dummy:dummy@localhost:5432/dummy" pnpm db:generate
 RUN pnpm build
+# Copy Prisma generated internals into dist (tsc doesn't copy .js → .js)
+RUN cp -r src/generated/prisma/internal dist/generated/prisma/internal
 
 # ── Production image ──────────────────────────────────────────────────────────
 FROM base AS runner
@@ -22,11 +24,9 @@ ENV NODE_ENV=production
 
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
-# Overlay Prisma generated files (includes internal .js files tsc doesn't copy)
-COPY --from=builder /app/src/generated ./dist/generated
 COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
-COPY --from=builder /app/tsconfig.json ./tsconfig.json
+COPY --from=builder /app/prisma.config.ts ./
+COPY --from=builder /app/tsconfig.json ./
 COPY package.json ./
 
 EXPOSE 3001
