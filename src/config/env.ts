@@ -7,6 +7,7 @@ const envSchema = z.object({
   BETTER_AUTH_URL: z.string().url(),
   WEB_URL: z.string().url(),
   APP_URL: z.string().min(1),
+  ALLOWED_ORIGINS: z.string().optional().default(''),
   ANTHROPIC_API_KEY: z.string().optional().default(''),
   FIREBASE_PROJECT_ID: z.string().optional().default(''),
   FIREBASE_CLIENT_EMAIL: z.string().optional().default(''),

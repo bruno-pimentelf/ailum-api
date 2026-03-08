@@ -101,6 +101,9 @@ async function authPlugin(fastify: FastifyInstance) {
       'http://localhost:3001',
       'http://localhost:3000',
       'http://127.0.0.1:3001',
+      ...(env.ALLOWED_ORIGINS
+        ? env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
+        : []),
     ],
     advanced: {
       disableCSRFCheck: env.NODE_ENV !== 'production',

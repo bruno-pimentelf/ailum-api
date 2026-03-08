@@ -45,8 +45,14 @@ export async function buildApp(): Promise<FastifyInstance> {
     contentSecurityPolicy: false, // managed by frontend
   })
 
+  const extraOrigins = env.ALLOWED_ORIGINS
+    ? env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
+    : []
+
+  const allowedOrigins = [env.WEB_URL, env.APP_URL, ...extraOrigins]
+
   await fastify.register(cors, {
-    origin: [env.WEB_URL, env.APP_URL],
+    origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
