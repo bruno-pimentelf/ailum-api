@@ -9,12 +9,24 @@ import type { MemberRole } from '../generated/prisma/client.js'
 import { sendInvitationEmail } from '../services/email.service.js'
 
 async function authPlugin(fastify: FastifyInstance) {
+  const isProd = env.NODE_ENV === 'production'
+
   const auth = betterAuth({
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
     basePath: '/auth',
     database: prismaAdapter(fastify.db, { provider: 'postgresql' }),
     emailAndPassword: { enabled: true },
+    advanced: {
+      disableCSRFCheck: !isProd,
+      crossSubdomainCookies: {
+        enabled: isProd,
+        ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
+      },
+      defaultCookieAttributes: isProd
+        ? { sameSite: 'none', secure: true, partitioned: true }
+        : { sameSite: 'lax', secure: false },
+    },
     plugins: [
       organization({
         async sendInvitationEmail(data) {
@@ -105,9 +117,6 @@ async function authPlugin(fastify: FastifyInstance) {
         ? env.ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean)
         : []),
     ],
-    advanced: {
-      disableCSRFCheck: env.NODE_ENV !== 'production',
-    },
   })
 
   // Mount all Better Auth routes at /auth/*
