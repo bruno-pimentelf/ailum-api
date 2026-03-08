@@ -19,13 +19,18 @@ async function authPlugin(fastify: FastifyInstance) {
     emailAndPassword: { enabled: true },
     advanced: {
       disableCSRFCheck: !isProd,
-      crossSubdomainCookies: {
-        enabled: isProd,
-        ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
-      },
       defaultCookieAttributes: isProd
-        ? { sameSite: 'none', secure: true, partitioned: true }
-        : { sameSite: 'lax', secure: false },
+        ? {
+            sameSite: 'none',
+            secure: true,
+            httpOnly: true,
+            ...(env.COOKIE_DOMAIN ? { domain: env.COOKIE_DOMAIN } : {}),
+          }
+        : {
+            sameSite: 'lax',
+            secure: false,
+            httpOnly: true,
+          },
     },
     plugins: [
       organization({
