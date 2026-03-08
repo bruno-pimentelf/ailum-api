@@ -1,0 +1,659 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────
+
+enum MemberRole {
+  ADMIN
+  PROFESSIONAL
+  SECRETARY
+}
+
+enum ContactStatus {
+  NEW_LEAD
+  QUALIFIED
+  APPOINTMENT_SCHEDULED
+  AWAITING_PAYMENT
+  PAYMENT_CONFIRMED
+  ATTENDED
+  NO_INTEREST
+  RECURRING
+  IN_HUMAN_SERVICE
+}
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+enum ChargeStatus {
+  PENDING
+  PAID
+  OVERDUE
+  CANCELLED
+  REFUNDED
+}
+
+enum TriggerEvent {
+  STAGE_ENTERED
+  STALE_IN_STAGE
+  PAYMENT_CONFIRMED
+  APPOINTMENT_APPROACHING
+  AI_INTENT
+  MESSAGE_RECEIVED
+}
+
+enum TriggerAction {
+  SEND_MESSAGE
+  MOVE_STAGE
+  GENERATE_PIX
+  NOTIFY_OPERATOR
+  WAIT_AND_REPEAT
+}
+
+enum MessageRole {
+  CONTACT
+  AGENT
+  OPERATOR
+  SYSTEM
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  AUDIO
+  DOCUMENT
+  PIX_CHARGE
+}
+
+enum VoiceProvider {
+  ELEVENLABS
+  AZURE
+  OPENAI
+}
+
+enum AgentModel {
+  HAIKU
+  SONNET
+}
+
+// ─────────────────────────────────────────────
+// BETTER AUTH TABLES (managed by Better Auth migrations)
+// ─────────────────────────────────────────────
+
+model User {
+  id            String   @id
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sessions    Session[]
+  accounts    Account[]
+  members     Member[]
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  activeOrganizationId String?
+
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@map("account")
+}
+
+model Verification {
+  id         String    @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime? @default(now())
+  updatedAt  DateTime? @updatedAt
+
+  @@map("verification")
+}
+
+model Organization {
+  id          String   @id
+  name        String
+  slug        String?  @unique
+  logo        String?
+  createdAt   DateTime @default(now())
+  metadata    String?
+
+  members     Member[]
+  invitations Invitation[]
+
+  @@map("organization")
+}
+
+model Member {
+  id             String   @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role           String
+  createdAt      DateTime @default(now())
+
+  @@map("member")
+}
+
+model Invitation {
+  id             String   @id
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  role           String?
+  status         String
+  expiresAt      DateTime
+  inviterId      String
+  createdAt      DateTime @default(now())
+
+  @@map("invitation")
+}
+
+// ─────────────────────────────────────────────
+// TENANT (espelho da Organization com configs extras)
+// ─────────────────────────────────────────────
+
+model Tenant {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clerkOrgId       String   @unique
+  name             String
+  slug             String   @unique
+  plan             String   @default("starter")
+  agentBasePrompt  String?
+  guardrailRules   String?
+  maxPixAmount     Decimal  @default(5000) @db.Decimal(10, 2)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now()) @db.Timestamptz
+
+  integrations         TenantIntegration[]
+  tenantMembers        TenantMember[]
+  professionals        Professional[]
+  services             Service[]
+  voices               Voice[]
+  funnels              Funnel[]
+  stages               Stage[]
+  triggers             Trigger[]
+  contacts             Contact[]
+  appointments         Appointment[]
+  charges              Charge[]
+  messages             Message[]
+  agentMemories        AgentMemory[]
+  guardrailViolations  GuardrailViolation[]
+  agentJobLogs         AgentJobLog[]
+
+  @@map("tenants")
+}
+
+model TenantIntegration {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String   @db.Uuid
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  provider        String
+  instanceId      String?
+  apiKeyEncrypted String?
+  webhookToken    String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now()) @db.Timestamptz
+
+  @@unique([tenantId, provider])
+  @@map("tenant_integrations")
+}
+
+// ─────────────────────────────────────────────
+// TENANT MEMBERS
+// ─────────────────────────────────────────────
+
+model TenantMember {
+  id             String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String     @db.Uuid
+  tenant         Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId         String
+  role           MemberRole
+  professionalId String?    @db.Uuid
+  professional   Professional? @relation(fields: [professionalId], references: [id])
+  isActive       Boolean    @default(true)
+  invitedBy      String?
+  joinedAt       DateTime?  @db.Timestamptz
+  createdAt      DateTime   @default(now()) @db.Timestamptz
+
+  @@map("tenant_members")
+}
+
+// ─────────────────────────────────────────────
+// PROFISSIONAIS
+// ─────────────────────────────────────────────
+
+model Professional {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String   @db.Uuid
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userId         String?
+  fullName       String
+  specialty      String?
+  bio            String?
+  avatarUrl      String?
+  voiceId        String?  @db.Uuid
+  voice          Voice?   @relation(fields: [voiceId], references: [id])
+  calendarColor  String   @default("#3b82f6")
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now()) @db.Timestamptz
+
+  availability         ProfessionalAvailability[]
+  availabilityExceptions AvailabilityException[]
+  professionalServices ProfessionalService[]
+  tenantMembers        TenantMember[]
+  appointments         Appointment[]
+  contacts             Contact[]
+
+  @@map("professionals")
+}
+
+model ProfessionalAvailability {
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  professionalId   String       @db.Uuid
+  professional     Professional @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  dayOfWeek        Int
+  startTime        String
+  endTime          String
+  slotDurationMin  Int          @default(50)
+
+  @@map("professional_availability")
+}
+
+model AvailabilityException {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  professionalId String       @db.Uuid
+  professional   Professional @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  date           DateTime     @db.Date
+  isUnavailable  Boolean      @default(true)
+  reason         String?
+
+  @@map("availability_exceptions")
+}
+
+// ─────────────────────────────────────────────
+// SERVIÇOS
+// ─────────────────────────────────────────────
+
+model Service {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String   @db.Uuid
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  durationMin Int      @default(50)
+  price       Decimal  @db.Decimal(10, 2)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now()) @db.Timestamptz
+
+  professionalServices ProfessionalService[]
+  appointments         Appointment[]
+
+  @@map("services")
+}
+
+model ProfessionalService {
+  professionalId String       @db.Uuid
+  professional   Professional @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  serviceId      String       @db.Uuid
+  service        Service      @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  customPrice    Decimal?     @db.Decimal(10, 2)
+
+  @@id([professionalId, serviceId])
+  @@map("professional_services")
+}
+
+// ─────────────────────────────────────────────
+// VOZES
+// ─────────────────────────────────────────────
+
+model Voice {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String        @db.Uuid
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name            String
+  provider        VoiceProvider
+  providerVoiceId String
+  sampleUrl       String?
+  isDefault       Boolean       @default(false)
+  createdAt       DateTime      @default(now()) @db.Timestamptz
+
+  professionals Professional[]
+
+  @@map("voices")
+}
+
+// ─────────────────────────────────────────────
+// FUNIS E STAGES
+// ─────────────────────────────────────────────
+
+model Funnel {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String   @db.Uuid
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  order       Int
+  createdAt   DateTime @default(now()) @db.Timestamptz
+
+  stages   Stage[]
+  contacts Contact[]
+
+  @@map("funnels")
+}
+
+model Stage {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  funnelId   String   @db.Uuid
+  funnel     Funnel   @relation(fields: [funnelId], references: [id], onDelete: Cascade)
+  tenantId   String   @db.Uuid
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name       String
+  color      String   @default("#64748b")
+  order      Int
+  isTerminal Boolean  @default(false)
+  createdAt  DateTime @default(now()) @db.Timestamptz
+
+  agentConfig StageAgentConfig?
+  triggers    Trigger[]
+  contacts    Contact[]
+
+  @@map("stages")
+}
+
+model StageAgentConfig {
+  id                      String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stageId                 String     @unique @db.Uuid
+  stage                   Stage      @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  funnelAgentName         String     @default("Assistente")
+  funnelAgentPersonality  String?
+  stageContext            String?
+  allowedTools            String[]
+  model                   AgentModel @default(SONNET)
+  temperature             Float      @default(0.3)
+  createdAt               DateTime   @default(now()) @db.Timestamptz
+  updatedAt               DateTime   @updatedAt @db.Timestamptz
+
+  @@map("stage_agent_configs")
+}
+
+// ─────────────────────────────────────────────
+// TRIGGERS
+// ─────────────────────────────────────────────
+
+model Trigger {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  stageId         String        @db.Uuid
+  stage           Stage         @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  tenantId        String        @db.Uuid
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  event           TriggerEvent
+  action          TriggerAction
+  actionConfig    Json
+  conditionConfig Json?
+  delayMinutes    Int           @default(0)
+  cooldownSeconds Int           @default(3600)
+  isActive        Boolean       @default(true)
+  createdAt       DateTime      @default(now()) @db.Timestamptz
+
+  executions TriggerExecution[]
+
+  @@index([stageId, isActive])
+  @@index([tenantId, isActive])
+  @@map("triggers")
+}
+
+// ─────────────────────────────────────────────
+// CONTATOS
+// ─────────────────────────────────────────────
+
+model Contact {
+  id                    String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId              String        @db.Uuid
+  tenant                Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  phone                 String
+  name                  String?
+  email                 String?
+  notes                 String?
+  currentFunnelId       String?       @db.Uuid
+  currentFunnel         Funnel?       @relation(fields: [currentFunnelId], references: [id])
+  currentStageId        String?       @db.Uuid
+  currentStage          Stage?        @relation(fields: [currentStageId], references: [id])
+  status                ContactStatus @default(NEW_LEAD)
+  stageEnteredAt        DateTime?     @db.Timestamptz
+  lastMessageAt         DateTime?     @db.Timestamptz
+  lastDetectedIntent    String?
+  lastPaymentStatus     String?
+  assignedProfessionalId String?      @db.Uuid
+  assignedProfessional  Professional? @relation(fields: [assignedProfessionalId], references: [id])
+  zapiSessionId         String?
+  metadata              Json?
+  isActive              Boolean       @default(true)
+  createdAt             DateTime      @default(now()) @db.Timestamptz
+  updatedAt             DateTime      @updatedAt @db.Timestamptz
+
+  appointments        Appointment[]
+  charges             Charge[]
+  messages            Message[]
+  agentMemories       AgentMemory[]
+  triggerExecutions   TriggerExecution[]
+  guardrailViolations GuardrailViolation[]
+  agentJobLogs        AgentJobLog[]
+
+  @@unique([tenantId, phone])
+  @@index([tenantId, status])
+  @@index([tenantId, currentStageId])
+  @@index([tenantId, phone])
+  @@map("contacts")
+}
+
+// ─────────────────────────────────────────────
+// AGENDAMENTOS
+// ─────────────────────────────────────────────
+
+model Appointment {
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String            @db.Uuid
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contactId        String            @db.Uuid
+  contact          Contact           @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  professionalId   String            @db.Uuid
+  professional     Professional      @relation(fields: [professionalId], references: [id])
+  serviceId        String            @db.Uuid
+  service          Service           @relation(fields: [serviceId], references: [id])
+  scheduledAt      DateTime          @db.Timestamptz
+  durationMin      Int
+  status           AppointmentStatus @default(PENDING)
+  notes            String?
+  chargeId         String?           @unique @db.Uuid
+  charge           Charge?           @relation(fields: [chargeId], references: [id])
+  cancelledReason  String?
+  createdBy        String
+  createdAt        DateTime          @default(now()) @db.Timestamptz
+  updatedAt        DateTime          @updatedAt @db.Timestamptz
+
+  @@index([tenantId, professionalId, scheduledAt])
+  @@index([tenantId, status])
+  @@map("appointments")
+}
+
+// ─────────────────────────────────────────────
+// COBRANÇAS
+// ─────────────────────────────────────────────
+
+model Charge {
+  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String       @db.Uuid
+  tenant          Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contactId       String       @db.Uuid
+  contact         Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  appointmentId   String?      @unique @db.Uuid
+  asaasPaymentId  String?      @unique
+  amount          Decimal      @db.Decimal(10, 2)
+  description     String
+  status          ChargeStatus @default(PENDING)
+  pixCopyPaste    String?
+  qrCodeBase64    String?
+  dueAt           DateTime?    @db.Timestamptz
+  paidAt          DateTime?    @db.Timestamptz
+  createdAt       DateTime     @default(now()) @db.Timestamptz
+  updatedAt       DateTime     @updatedAt @db.Timestamptz
+
+  appointment Appointment?
+
+  @@index([tenantId, status])
+  @@index([asaasPaymentId])
+  @@map("charges")
+}
+
+// ─────────────────────────────────────────────
+// MENSAGENS
+// ─────────────────────────────────────────────
+
+model Message {
+  id             String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String      @db.Uuid
+  tenant         Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contactId      String      @db.Uuid
+  contact        Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  role           MessageRole
+  type           MessageType @default(TEXT)
+  content        String
+  metadata       Json?
+  zapiMessageId  String?     @unique
+  sessionId      String?
+  createdAt      DateTime    @default(now()) @db.Timestamptz
+
+  agentMemories AgentMemory[]
+  agentJobLogs  AgentJobLog[]
+
+  @@index([contactId, createdAt])
+  @@index([zapiMessageId])
+  @@map("messages")
+}
+
+// ─────────────────────────────────────────────
+// MEMÓRIA DO AGENTE
+// ─────────────────────────────────────────────
+
+model AgentMemory {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId        String   @db.Uuid
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contactId       String   @db.Uuid
+  contact         Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  key             String
+  value           String
+  confidence      Float    @default(1.0)
+  sourceMessageId String?  @db.Uuid
+  sourceMessage   Message? @relation(fields: [sourceMessageId], references: [id])
+  createdAt       DateTime @default(now()) @db.Timestamptz
+  updatedAt       DateTime @updatedAt @db.Timestamptz
+
+  @@unique([contactId, key])
+  @@index([contactId, key])
+  @@map("agent_memories")
+}
+
+// ─────────────────────────────────────────────
+// AUDIT E LOGS
+// ─────────────────────────────────────────────
+
+model TriggerExecution {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  triggerId    String   @db.Uuid
+  trigger      Trigger  @relation(fields: [triggerId], references: [id])
+  contactId    String   @db.Uuid
+  contact      Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tenantId     String   @db.Uuid
+  executedAt   DateTime @default(now()) @db.Timestamptz
+  result       Json
+  aiGenerated  Boolean  @default(false)
+  aiPrompt     String?
+  aiOutput     String?
+
+  @@map("trigger_executions")
+}
+
+model GuardrailViolation {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String   @db.Uuid
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contactId        String   @db.Uuid
+  contact          Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  originalResponse String
+  violation        String
+  severity         String
+  wasBlocked       Boolean
+  createdAt        DateTime @default(now()) @db.Timestamptz
+
+  @@map("guardrail_violations")
+}
+
+model AgentJobLog {
+  id                    String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId              String   @db.Uuid
+  contactId             String   @db.Uuid
+  contact               Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  messageId             String?  @db.Uuid
+  message               Message? @relation(fields: [messageId], references: [id])
+  routerIntent          String?
+  routerConfidence      Float?
+  stageAgentToolCalls   Int      @default(0)
+  totalInputTokens      Int      @default(0)
+  totalOutputTokens     Int      @default(0)
+  durationMs            Int?
+  error                 String?
+  createdAt             DateTime @default(now()) @db.Timestamptz
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("agent_job_logs")
+}
