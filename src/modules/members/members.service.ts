@@ -3,13 +3,25 @@ import type { FastifyInstance } from 'fastify'
 import { sendInvitationEmail } from '../../services/email.service.js'
 
 export async function listMembers(db: PrismaClient, tenantId: string) {
-  return db.tenantMember.findMany({
+  const members = await db.tenantMember.findMany({
     where: { tenantId, isActive: true },
     orderBy: { createdAt: 'asc' },
     include: {
       professional: { select: { id: true, fullName: true, specialty: true } },
     },
   })
+
+  const userIds = members.map((m) => m.userId).filter(Boolean)
+  const users = await db.user.findMany({
+    where: { id: { in: userIds } },
+    select: { id: true, name: true, email: true, image: true },
+  })
+  const userMap = new Map(users.map((u) => [u.id, u]))
+
+  return members.map((m) => ({
+    ...m,
+    user: userMap.get(m.userId) ?? null,
+  }))
 }
 
 export async function inviteMember(
