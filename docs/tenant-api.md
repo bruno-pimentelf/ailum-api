@@ -15,6 +15,7 @@ Qualquer membro autenticado.
   "name": "Clínica Harmonia",
   "slug": "clinica-harmonia",
   "plan": "starter",
+  "isAgentEnabledForWhatsApp": false,
   "logoUrl": null,
   "description": null,
   "phone": null,
@@ -41,6 +42,7 @@ Requer **ADMIN**. Todos os campos são opcionais.
 ```json
 {
   "name": "Clínica Harmonia",
+  "isAgentEnabledForWhatsApp": true,
   "description": "Clínica especializada em saúde integrativa.",
   "phone": "(11) 3456-7890",
   "email": "contato@clinica.com",

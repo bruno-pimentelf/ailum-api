@@ -46,14 +46,20 @@ interface SendMessageInput {
 
 // ─── Executor ────────────────────────────────────────────────────────────────
 
+export interface ExecuteToolOptions {
+  testMode?: boolean
+}
+
 export async function executeToolSafely(
   toolName: string,
   input: Record<string, unknown>,
   context: AgentContext,
   fastify: FastifyInstance,
+  options?: ExecuteToolOptions,
 ): Promise<ToolResult> {
   const db = fastify.db
   const firebaseSync = new FirebaseSyncService(fastify.firebase.firestore)
+  const testMode = options?.testMode ?? false
 
   try {
     switch (toolName) {
@@ -70,7 +76,14 @@ export async function executeToolSafely(
         return await notifyOperator(input as unknown as NotifyOperatorInput, context, db, firebaseSync, fastify)
 
       case 'send_message':
-        return await sendMessage(input as unknown as SendMessageInput, context, db, firebaseSync, fastify)
+        return await sendMessage(
+          input as unknown as SendMessageInput,
+          context,
+          db,
+          firebaseSync,
+          fastify,
+          testMode,
+        )
 
       default:
         return { success: false, requiresConfirmation: false, reason: `Unknown tool: ${toolName}` }
@@ -364,8 +377,13 @@ async function sendMessage(
   db: FastifyInstance['db'],
   sync: FirebaseSyncService,
   fastify: FastifyInstance,
+  testMode: boolean,
 ): Promise<ToolResult> {
-  if (context.zapiIntegration?.isActive && context.zapiIntegration.instanceId) {
+  if (
+    !testMode &&
+    context.zapiIntegration?.isActive &&
+    context.zapiIntegration.instanceId
+  ) {
     const zapi = new ZapiService()
 
     if (input.type && input.type !== 'TEXT' && input.media_url) {

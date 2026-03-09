@@ -10,15 +10,16 @@ export interface AgentJobData {
   messageType: string
   zapiMessageId?: string
   sessionId?: string
+  testMode?: boolean
 }
 
 export function createAgentWorker(fastify: FastifyInstance) {
   const worker = new Worker<AgentJobData>(
     'agent',
     async (job) => {
-      const { tenantId, contactId, messageContent } = job.data
+      const { tenantId, contactId, messageContent, testMode } = job.data
 
-      job.log(`[agent-job] contact=${contactId} tenant=${tenantId}`)
+      job.log(`[agent-job] contact=${contactId} tenant=${tenantId} testMode=${testMode ?? false}`)
 
       // Verifica se o agente está configurado (ANTHROPIC_API_KEY)
       if (!env.ANTHROPIC_API_KEY) {
@@ -28,7 +29,9 @@ export function createAgentWorker(fastify: FastifyInstance) {
 
       try {
         // A mensagem já foi salva pelo webhook antes de enfileirar — não salvar novamente
-        const result = await orchestrate(messageContent, contactId, tenantId, fastify)
+        const result = await orchestrate(messageContent, contactId, tenantId, fastify, {
+          testMode: testMode ?? false,
+        })
 
         job.log(`[agent-job] status=${result.status} duration=${result.durationMs}ms`)
 
@@ -41,8 +44,10 @@ export function createAgentWorker(fastify: FastifyInstance) {
             data: {
               tenantId,
               contactId,
+              status: 'ERROR',
               error: errorMessage,
               durationMs: 0,
+              auditDetails: [{ label: 'Erro', detail: errorMessage }],
             },
           })
         } catch (logErr) {

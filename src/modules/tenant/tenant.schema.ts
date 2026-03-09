@@ -2,6 +2,7 @@ import { Type } from '@sinclair/typebox'
 
 export const UpdateTenantSchema = Type.Object({
   name: Type.Optional(Type.String({ minLength: 1 })),
+  isAgentEnabledForWhatsApp: Type.Optional(Type.Boolean()),
   description: Type.Optional(Type.String()),
   phone: Type.Optional(Type.String()),
   email: Type.Optional(Type.String({ format: 'email' })),

@@ -7,6 +7,7 @@ const SendMessageSchema = Type.Object({
   contactId: Type.String({ format: 'uuid' }),
   message: Type.String({ minLength: 1, maxLength: 4096 }),
   sessionId: Type.Optional(Type.String()),
+  testMode: Type.Optional(Type.Boolean()),
 })
 
 const ConfirmSchema = Type.Object({
@@ -17,7 +18,59 @@ const JobParamsSchema = Type.Object({
   jobId: Type.String(),
 })
 
+const PLAYGROUND_PHONE = '__playground__'
+
+async function getOrCreatePlaygroundContact(
+  fastify: FastifyInstance,
+  tenantId: string,
+) {
+  const existing = await fastify.db.contact.findFirst({
+    where: { tenantId, phone: PLAYGROUND_PHONE, isActive: true },
+    select: { id: true, phone: true, name: true, currentStageId: true, currentFunnelId: true },
+  })
+  if (existing) return existing
+
+  const firstStage = await fastify.db.stage.findFirst({
+    where: { funnel: { tenantId, isActive: true } },
+    orderBy: [{ funnel: { order: 'asc' } }, { order: 'asc' }],
+    include: { funnel: { select: { id: true } } },
+  })
+
+  if (!firstStage) {
+    throw fastify.httpErrors.badRequest(
+      'Crie um funil com pelo menos um stage antes de usar o playground',
+    )
+  }
+
+  const contact = await fastify.db.contact.create({
+    data: {
+      tenantId,
+      phone: PLAYGROUND_PHONE,
+      name: 'Playground',
+      status: 'NEW_LEAD',
+      currentFunnelId: firstStage.funnelId,
+      currentStageId: firstStage.id,
+      stageEnteredAt: new Date(),
+    },
+    select: { id: true, phone: true, name: true, currentStageId: true, currentFunnelId: true },
+  })
+
+  return contact
+}
+
 export async function agentRoutes(fastify: FastifyInstance) {
+  /**
+   * GET /v1/agent/playground-contact
+   * Retorna ou cria o contato de playground do tenant.
+   */
+  fastify.get(
+    '/playground-contact',
+    { onRequest: [fastify.authenticate] },
+    async (request) => {
+      return getOrCreatePlaygroundContact(fastify, request.tenantId)
+    },
+  )
+
   /**
    * POST /v1/agent/message
    * Enqueues an incoming message for async processing by the agent.
@@ -30,10 +83,35 @@ export async function agentRoutes(fastify: FastifyInstance) {
       schema: { body: SendMessageSchema },
     },
     async (request, reply) => {
-      const { contactId, message, sessionId } = request.body as {
+      const { contactId, message, sessionId, testMode } = request.body as {
         contactId: string
         message: string
         sessionId?: string
+        testMode?: boolean
+      }
+
+      // testMode (playground): salva mensagem do usuário antes de enfileirar
+      if (testMode) {
+        const sync = new (await import('../../services/firebase-sync.service.js')).FirebaseSyncService(
+          fastify.firebase.firestore,
+          fastify.log,
+        )
+        const saved = await fastify.db.message.create({
+          data: {
+            tenantId: request.tenantId,
+            contactId,
+            role: 'CONTACT',
+            type: 'TEXT',
+            content: message,
+          },
+        })
+        await sync.syncConversationMessage(request.tenantId, contactId, {
+          id: saved.id,
+          role: 'CONTACT',
+          type: 'TEXT',
+          content: message,
+          createdAt: saved.createdAt,
+        })
       }
 
       const job = await agentQueue.add(
@@ -44,6 +122,7 @@ export async function agentRoutes(fastify: FastifyInstance) {
           messageContent: message,
           messageType: 'TEXT',
           sessionId,
+          testMode: testMode ?? false,
         },
         {
           jobId: `agent:${contactId}:${Date.now()}`,
@@ -70,6 +149,45 @@ export async function agentRoutes(fastify: FastifyInstance) {
     async (request) => {
       const { contactId } = request.body as { contactId: string }
       return confirmAndExecute(contactId, request.tenantId, fastify)
+    },
+  )
+
+  /**
+   * GET /v1/agent/audit
+   * Lista os últimos audit logs do agente para um contato (ex.: playground).
+   * Query: contactId (uuid), limit (opcional, default 20)
+   */
+  fastify.get(
+    '/audit',
+    {
+      onRequest: [fastify.authenticate],
+    },
+    async (request, reply) => {
+      const { contactId, limit } = request.query as {
+        contactId?: string
+        limit?: number
+      }
+      if (!contactId) return reply.badRequest('contactId é obrigatório')
+
+      const logs = await fastify.db.agentJobLog.findMany({
+        where: { contactId, tenantId: request.tenantId },
+        orderBy: { createdAt: 'desc' },
+        take: Math.min(limit ?? 20, 50),
+        select: {
+          id: true,
+          status: true,
+          routerIntent: true,
+          routerConfidence: true,
+          stageAgentToolCalls: true,
+          totalInputTokens: true,
+          totalOutputTokens: true,
+          durationMs: true,
+          error: true,
+          auditDetails: true,
+          createdAt: true,
+        },
+      })
+      return logs
     },
   )
 

@@ -534,8 +534,17 @@ async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPay
     },
   )
 
-  // Apenas mensagens do contato disparam o agente
+  // Apenas mensagens do contato disparam o agente — e só se estiver habilitado
   if (!payload.fromMe) {
+    const tenant = await fastify.db.tenant.findUnique({
+      where: { id: tenantId },
+      select: { isAgentEnabledForWhatsApp: true },
+    })
+    if (!tenant?.isAgentEnabledForWhatsApp) {
+      fastify.log.debug({ tenantId }, 'zapi:received:agent_disabled_for_whatsapp')
+      return
+    }
+
     const job = await agentQueue.add(
       'process-message',
       {

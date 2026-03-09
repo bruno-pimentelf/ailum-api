@@ -18,7 +18,11 @@ export async function listContacts(
   const limit = query.limit ?? 20
   const skip = (page - 1) * limit
 
-  const SYSTEM_PHONE_BLOCKLIST = ['status@broadcast', 'status@s.whatsapp.net']
+  const SYSTEM_PHONE_BLOCKLIST = [
+    'status@broadcast',
+    'status@s.whatsapp.net',
+    '__playground__',
+  ]
 
   const where = {
     tenantId,

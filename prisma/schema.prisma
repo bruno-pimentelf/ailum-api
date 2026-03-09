@@ -216,8 +216,9 @@ model Tenant {
   clerkOrgId       String   @unique
   name             String
   slug             String   @unique
-  plan             String   @default("starter")
-  agentBasePrompt  String?
+  plan                      String   @default("starter")
+  isAgentEnabledForWhatsApp Boolean  @default(false)
+  agentBasePrompt           String?
   guardrailRules   String?
   maxPixAmount     Decimal  @default(5000) @db.Decimal(10, 2)
   isActive         Boolean  @default(true)
@@ -673,6 +674,7 @@ model AgentJobLog {
   contact               Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
   messageId             String?  @db.Uuid
   message               Message? @relation(fields: [messageId], references: [id])
+  status                String   // REPLIED | ESCALATED | TRIGGER_RESOLVED | CONFIRMATION_REQUIRED | ERROR
   routerIntent          String?
   routerConfidence      Float?
   stageAgentToolCalls   Int      @default(0)
@@ -680,6 +682,7 @@ model AgentJobLog {
   totalOutputTokens     Int      @default(0)
   durationMs            Int?
   error                 String?
+  auditDetails          Json?    // [{ label, detail, data? }] — audit verboso para o front
   createdAt             DateTime @default(now()) @db.Timestamptz
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
