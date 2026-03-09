@@ -417,6 +417,12 @@ async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPay
     return
   }
 
+  const SYSTEM_PHONES = ['status@broadcast', 'status@s.whatsapp.net']
+  if (SYSTEM_PHONES.includes(phone)) {
+    fastify.log.debug({ phone }, 'zapi:received:system_phone_skipped')
+    return
+  }
+
   const extracted = extractContent(payload)
   if (!extracted) {
     fastify.log.debug({ zapiMessageId, phone, fromMe: payload.fromMe }, 'zapi:received:skipped_non_actionable')

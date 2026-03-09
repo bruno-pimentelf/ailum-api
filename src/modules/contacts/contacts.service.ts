@@ -18,9 +18,12 @@ export async function listContacts(
   const limit = query.limit ?? 20
   const skip = (page - 1) * limit
 
+  const SYSTEM_PHONE_BLOCKLIST = ['status@broadcast', 'status@s.whatsapp.net']
+
   const where = {
     tenantId,
     isActive: true,
+    NOT: { phone: { in: SYSTEM_PHONE_BLOCKLIST } },
     ...(query.funnelId && { currentFunnelId: query.funnelId }),
     ...(query.stageId && { currentStageId: query.stageId }),
     ...(query.status && { status: query.status as never }),
