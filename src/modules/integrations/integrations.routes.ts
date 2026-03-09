@@ -16,6 +16,7 @@ import {
   disconnectZapiInstance,
   restartZapiInstance,
 } from './integrations.service.js'
+import { FirebaseSyncService } from '../../services/firebase-sync.service.js'
 
 export async function integrationsRoutes(fastify: FastifyInstance) {
   // GET /v1/integrations — lista todas as integrações do tenant (sem expor API keys)
@@ -37,6 +38,11 @@ export async function integrationsRoutes(fastify: FastifyInstance) {
       body.instanceToken,
       fastify.log,
     )
+
+    // Garante que o doc do tenant existe no Firestore imediatamente,
+    // sem esperar o primeiro webhook chegar para criá-lo.
+    const sync = new FirebaseSyncService(fastify.firebase.firestore, fastify.log)
+    await sync.syncInstanceStatus(req.tenantId, false)
 
     return reply.status(200).send({
       ...result,

@@ -48,6 +48,25 @@ export async function upsertZapiIntegration(
   tenantId: string,
   data: { instanceId: string; instanceToken: string },
 ): Promise<IntegrationView> {
+  // Garante que a instanceId não está em uso por outro tenant ativo.
+  // Uma instância Z-API = um número WhatsApp = um único tenant.
+  const conflict = await db.tenantIntegration.findFirst({
+    where: {
+      instanceId: data.instanceId,
+      provider: 'zapi',
+      isActive: true,
+      NOT: { tenantId },   // ignora o próprio tenant (re-cadastro da mesma instância)
+    },
+    select: { tenantId: true },
+  })
+
+  if (conflict) {
+    throw Object.assign(
+      new Error('Esta instância Z-API já está cadastrada em outra clínica'),
+      { statusCode: 409 },
+    )
+  }
+
   const apiKeyEncrypted = encrypt(data.instanceToken)
 
   const row = await db.tenantIntegration.upsert({
