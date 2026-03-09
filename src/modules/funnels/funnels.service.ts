@@ -218,3 +218,87 @@ export async function toggleTrigger(db: PrismaClient, tenantId: string, id: stri
     data: { isActive: !trigger.isActive },
   })
 }
+
+// ─── Board View ───────────────────────────────────────────────────────────────
+
+export async function getBoardView(
+  db: PrismaClient,
+  tenantId: string,
+  funnelId: string,
+  filters?: { search?: string; assignedProfessionalId?: string },
+) {
+  const funnel = await db.funnel.findFirstOrThrow({
+    where: { id: funnelId, tenantId, isActive: true },
+    select: { id: true, name: true, description: true },
+  })
+
+  const stages = await db.stage.findMany({
+    where: { funnelId, tenantId },
+    orderBy: { order: 'asc' },
+    select: {
+      id: true,
+      name: true,
+      color: true,
+      order: true,
+      isTerminal: true,
+    },
+  })
+
+  const contactWhere = {
+    tenantId,
+    currentFunnelId: funnelId,
+    isActive: true,
+    ...(filters?.assignedProfessionalId && {
+      assignedProfessionalId: filters.assignedProfessionalId,
+    }),
+    ...(filters?.search && {
+      OR: [
+        { name: { contains: filters.search, mode: 'insensitive' as const } },
+        { phone: { contains: filters.search } },
+      ],
+    }),
+  }
+
+  const contacts = await db.contact.findMany({
+    where: contactWhere,
+    orderBy: { lastMessageAt: { sort: 'desc', nulls: 'last' } },
+    select: {
+      id: true,
+      phone: true,
+      name: true,
+      photoUrl: true,
+      status: true,
+      stageEnteredAt: true,
+      lastMessageAt: true,
+      lastPaymentStatus: true,
+      lastDetectedIntent: true,
+      currentStageId: true,
+      assignedProfessional: { select: { id: true, fullName: true } },
+      messages: {
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: { content: true, type: true, createdAt: true, role: true },
+      },
+    },
+  })
+
+  const contactsByStage = new Map<string, typeof contacts>()
+  for (const stage of stages) {
+    contactsByStage.set(stage.id, [])
+  }
+  // contacts with no stage go into a virtual null bucket (ignored on board)
+  for (const contact of contacts) {
+    if (contact.currentStageId && contactsByStage.has(contact.currentStageId)) {
+      contactsByStage.get(contact.currentStageId)!.push(contact)
+    }
+  }
+
+  return {
+    funnel,
+    stages: stages.map((stage) => ({
+      ...stage,
+      contacts: contactsByStage.get(stage.id) ?? [],
+      _count: { contacts: (contactsByStage.get(stage.id) ?? []).length },
+    })),
+  }
+}

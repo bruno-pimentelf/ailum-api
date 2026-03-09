@@ -5,12 +5,14 @@ import {
   CreateStageSchema, UpdateStageSchema,
   UpsertAgentConfigSchema,
   CreateTriggerSchema, UpdateTriggerSchema,
+  BoardQuerySchema,
 } from './funnels.schema.js'
 import {
   listFunnels, createFunnel, updateFunnel, deleteFunnel,
   listStages, createStage, updateStage, deleteStage,
   getStageAgentConfig, upsertStageAgentConfig,
   listTriggers, createTrigger, updateTrigger, deleteTrigger, toggleTrigger,
+  getBoardView,
 } from './funnels.service.js'
 import { PERMISSIONS } from '../../constants/permissions.js'
 
@@ -34,6 +36,16 @@ export async function funnelsRoutes(fastify: FastifyInstance) {
     onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.FUNNELS_WRITE)],
     schema: { params: FunnelParamsSchema },
   }, async (req) => deleteFunnel(fastify.db, req.tenantId, (req.params as { id: string }).id))
+
+  // ── Board View ────────────────────────────────────────────────────────────────
+  fastify.get('/:id/board', {
+    onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.FUNNELS_READ)],
+    schema: { params: FunnelParamsSchema, querystring: BoardQuerySchema },
+  }, async (req) => {
+    const { id } = req.params as { id: string }
+    const query = req.query as { search?: string; assignedProfessionalId?: string }
+    return getBoardView(fastify.db, req.tenantId, id, query)
+  })
 
   // ── Stages ───────────────────────────────────────────────────────────────────
   fastify.get('/:id/stages', {

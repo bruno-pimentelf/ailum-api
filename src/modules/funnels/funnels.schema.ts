@@ -60,3 +60,8 @@ export const CreateTriggerSchema = Type.Object({
 })
 
 export const UpdateTriggerSchema = Type.Partial(CreateTriggerSchema)
+
+export const BoardQuerySchema = Type.Object({
+  search: Type.Optional(Type.String()),
+  assignedProfessionalId: Type.Optional(Type.String({ format: 'uuid' })),
+})
