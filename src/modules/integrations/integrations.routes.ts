@@ -26,12 +26,12 @@ export async function integrationsRoutes(fastify: FastifyInstance) {
     onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.TENANT_INTEGRATIONS_WRITE)],
     schema: { body: UpsertZapiSchema },
   }, async (req, reply) => {
-    const body = req.body as { instanceId: string; clientToken: string; webhookToken?: string }
+    const body = req.body as { instanceId: string; instanceToken: string }
     const result = await upsertZapiIntegration(fastify.db, req.tenantId, body)
 
     const webhookResult = await registerZapiWebhooks(
       body.instanceId,
-      body.clientToken,
+      body.instanceToken,
       fastify.log,
     )
 

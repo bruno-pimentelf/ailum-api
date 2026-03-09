@@ -1,5 +1,6 @@
 import type { PrismaClient } from '../generated/prisma/client.js'
 import { decrypt } from '../config/encryption.js'
+import { env } from '../config/env.js'
 
 const BASE_URL = 'https://api.z-api.io'
 
@@ -47,17 +48,17 @@ export async function getZapiConfig(
 
 async function zapiFetch<T>(
   instanceId: string,
-  clientToken: string,
+  instanceToken: string,
   path: string,
   body: unknown,
 ): Promise<T> {
   const response = await globalThis.fetch(
-    `${BASE_URL}/instances/${instanceId}/token/${clientToken}${path}`,
+    `${BASE_URL}/instances/${instanceId}/token/${instanceToken}${path}`,
     {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'client-token': clientToken,
+        'client-token': env.ZAPI_WEBHOOK_TOKEN,
       },
       body: JSON.stringify(body),
     },

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import fp from 'fastify-plugin'
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { betterAuth } from 'better-auth'
@@ -33,11 +34,11 @@ async function authPlugin(fastify: FastifyInstance) {
             inviteLink: `${env.WEB_URL}/invite/${data.id}`,
           })
         },
-        // Create mirror records when Better Auth manages orgs/members
-        organizationCreation: {
-          afterCreate: async ({ organization: org }: { organization: { id: string; name: string; slug?: string | null } }) => {
+        organizationHooks: {
+          afterCreateOrganization: async ({ organization: org, member }) => {
             try {
-              await fastify.db.tenant.upsert({
+              // 1. Cria o tenant espelho
+              const tenant = await fastify.db.tenant.upsert({
                 where: { clerkOrgId: org.id },
                 create: {
                   clerkOrgId: org.id,
@@ -51,53 +52,38 @@ async function authPlugin(fastify: FastifyInstance) {
                 },
               })
               fastify.log.info({ orgId: org.id }, 'auth:org:tenant_mirror_created')
+
+              // 2. Cria o tenant_member espelho para o criador (owner/admin)
+              if (member) {
+                const roleMap: Record<string, MemberRole> = {
+                  admin: 'ADMIN',
+                  owner: 'ADMIN',
+                  professional: 'PROFESSIONAL',
+                  secretary: 'SECRETARY',
+                  member: 'SECRETARY',
+                }
+                const role: MemberRole = roleMap[member.role] ?? 'ADMIN'
+
+                // Better Auth usa IDs alfanuméricos, não UUIDs — usamos findFirst + create/update
+                const existing = await fastify.db.tenantMember.findFirst({
+                  where: { tenantId: tenant.id, userId: member.userId },
+                })
+                if (!existing) {
+                  await fastify.db.tenantMember.create({
+                    data: {
+                      id: randomUUID(),
+                      tenantId: tenant.id,
+                      userId: member.userId,
+                      role,
+                      isActive: true,
+                      joinedAt: new Date(),
+                    },
+                  })
+                }
+                fastify.log.info({ tenantId: tenant.id, userId: member.userId }, 'auth:member:tenant_member_mirror_created')
+              }
             } catch (err) {
               fastify.log.error({ err, orgId: org.id }, 'auth:org:tenant_mirror_error')
-            }
-          },
-        },
-        membershipCreation: {
-          afterCreate: async ({ member }: { member: { id: string; userId: string; organizationId: string; role: string } }) => {
-            try {
-              const tenant = await fastify.db.tenant.findFirst({
-                where: { clerkOrgId: member.organizationId },
-                select: { id: true },
-              })
-              if (!tenant) return
-
-              // Map Better Auth roles → our MemberRole enum
-              const roleMap: Record<string, MemberRole> = {
-                admin: 'ADMIN',
-                owner: 'ADMIN',
-                professional: 'PROFESSIONAL',
-                secretary: 'SECRETARY',
-                member: 'SECRETARY',
-              }
-              const role: MemberRole = roleMap[member.role] ?? 'SECRETARY'
-
-              await fastify.db.tenantMember.upsert({
-                where: {
-                  // Use a composite index or search by userId+tenantId
-                  // Prisma requires a unique constraint for upsert; using findFirst + create/update
-                  id: member.id,
-                },
-                create: {
-                  id: member.id,
-                  tenantId: tenant.id,
-                  userId: member.userId,
-                  role,
-                  isActive: true,
-                  joinedAt: new Date(),
-                },
-                update: {
-                  role,
-                  isActive: true,
-                  joinedAt: new Date(),
-                },
-              })
-              fastify.log.info({ memberId: member.id }, 'auth:member:tenant_member_mirror_created')
-            } catch (err) {
-              fastify.log.error({ err, memberId: member.id }, 'auth:member:tenant_member_mirror_error')
             }
           },
         },

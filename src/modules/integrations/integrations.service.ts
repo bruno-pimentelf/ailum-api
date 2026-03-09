@@ -46,16 +46,15 @@ export async function listIntegrations(
 export async function upsertZapiIntegration(
   db: PrismaClient,
   tenantId: string,
-  data: { instanceId: string; clientToken: string; webhookToken?: string },
+  data: { instanceId: string; instanceToken: string },
 ): Promise<IntegrationView> {
-  const apiKeyEncrypted = encrypt(data.clientToken)
+  const apiKeyEncrypted = encrypt(data.instanceToken)
 
   const row = await db.tenantIntegration.upsert({
     where: { tenantId_provider: { tenantId, provider: 'zapi' } },
     update: {
       instanceId: data.instanceId,
       apiKeyEncrypted,
-      ...(data.webhookToken !== undefined && { webhookToken: data.webhookToken }),
       isActive: true,
     },
     create: {
@@ -63,7 +62,6 @@ export async function upsertZapiIntegration(
       provider: 'zapi',
       instanceId: data.instanceId,
       apiKeyEncrypted,
-      webhookToken: data.webhookToken ?? null,
       isActive: true,
     },
     select: {
@@ -137,26 +135,28 @@ export async function deactivateIntegration(
 
 const ZAPI_BASE = 'https://api.z-api.io'
 
+// Na Z-API, a URL usa o instanceToken para identificar a instância,
+// mas o header client-token deve ser o Client-Token da conta (env.ZAPI_WEBHOOK_TOKEN).
 async function zapiPut(
   instanceId: string,
-  clientToken: string,
+  instanceToken: string,
   path: string,
   body: unknown,
 ): Promise<Response> {
-  return fetch(`${ZAPI_BASE}/instances/${instanceId}/token/${clientToken}${path}`, {
+  return fetch(`${ZAPI_BASE}/instances/${instanceId}/token/${instanceToken}${path}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'client-token': clientToken },
+    headers: { 'Content-Type': 'application/json', 'client-token': env.ZAPI_WEBHOOK_TOKEN },
     body: JSON.stringify(body),
   })
 }
 
 async function zapiGet(
   instanceId: string,
-  clientToken: string,
+  instanceToken: string,
   path: string,
 ): Promise<Response> {
-  return fetch(`${ZAPI_BASE}/instances/${instanceId}/token/${clientToken}${path}`, {
-    headers: { 'client-token': clientToken },
+  return fetch(`${ZAPI_BASE}/instances/${instanceId}/token/${instanceToken}${path}`, {
+    headers: { 'client-token': env.ZAPI_WEBHOOK_TOKEN },
   })
 }
 

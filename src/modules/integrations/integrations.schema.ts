@@ -2,8 +2,7 @@ import { Type } from '@sinclair/typebox'
 
 export const UpsertZapiSchema = Type.Object({
   instanceId: Type.String({ minLength: 1 }),
-  clientToken: Type.String({ minLength: 1 }),
-  webhookToken: Type.Optional(Type.String()),
+  instanceToken: Type.String({ minLength: 1 }),
 })
 
 export const UpsertAsaasSchema = Type.Object({
