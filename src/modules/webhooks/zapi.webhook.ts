@@ -639,7 +639,10 @@ export async function zapiWebhookRoutes(fastify: FastifyInstance) {
 
     const token = request.headers['client-token'] as string | undefined
     if (token !== env.ZAPI_WEBHOOK_TOKEN) {
-      fastify.log.warn({ ip: request.ip }, 'zapi:webhook:invalid_token')
+      fastify.log.warn(
+        { ip: request.ip, receivedToken: token?.slice(0, 6) + '***', expectedPrefix: env.ZAPI_WEBHOOK_TOKEN?.slice(0, 6) + '***' },
+        'zapi:webhook:invalid_token',
+      )
       return
     }
 

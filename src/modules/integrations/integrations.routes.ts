@@ -12,6 +12,9 @@ import {
   deactivateIntegration,
   testZapiConnection,
   registerZapiWebhooks,
+  getZapiQrCode,
+  disconnectZapiInstance,
+  restartZapiInstance,
 } from './integrations.service.js'
 
 export async function integrationsRoutes(fastify: FastifyInstance) {
@@ -42,10 +45,38 @@ export async function integrationsRoutes(fastify: FastifyInstance) {
     })
   })
 
-  // GET /v1/integrations/zapi/test — testa a conexão Z-API (instância conectada ao WA?)
-  fastify.get('/zapi/test', {
+  // GET /v1/integrations/zapi/status — status da conexão da instância
+  fastify.get('/zapi/status', {
     onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.TENANT_SETTINGS_READ)],
   }, async (req) => testZapiConnection(fastify.db, req.tenantId))
+
+  // GET /v1/integrations/zapi/qrcode — QR code base64 para escanear com o WhatsApp
+  // O QR code expira a cada 20s — o front deve fazer polling a cada 10-15s
+  fastify.get('/zapi/qrcode', {
+    onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.TENANT_SETTINGS_READ)],
+  }, async (req, reply) => {
+    const result = await getZapiQrCode(fastify.db, req.tenantId)
+    if (!result) return reply.notFound('QR code indisponível — instância não configurada ou já conectada')
+    return result
+  })
+
+  // POST /v1/integrations/zapi/disconnect — desconecta o WhatsApp da instância
+  fastify.post('/zapi/disconnect', {
+    onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.TENANT_INTEGRATIONS_WRITE)],
+  }, async (req, reply) => {
+    const ok = await disconnectZapiInstance(fastify.db, req.tenantId)
+    if (!ok) return reply.internalServerError('Falha ao desconectar instância')
+    return { disconnected: true }
+  })
+
+  // POST /v1/integrations/zapi/restart — reinicia a instância Z-API
+  fastify.post('/zapi/restart', {
+    onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.TENANT_INTEGRATIONS_WRITE)],
+  }, async (req, reply) => {
+    const ok = await restartZapiInstance(fastify.db, req.tenantId)
+    if (!ok) return reply.internalServerError('Falha ao reiniciar instância')
+    return { restarted: true }
+  })
 
   // PUT /v1/integrations/asaas — cadastra ou atualiza chave Asaas
   fastify.put('/asaas', {

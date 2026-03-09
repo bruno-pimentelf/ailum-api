@@ -61,16 +61,51 @@ Salva credenciais Z-API **e auto-configura os webhooks** na instância.
 
 ---
 
-## GET /v1/integrations/zapi/test
+## GET /v1/integrations/zapi/status
 
-Verifica se a instância Z-API está online e conectada ao WhatsApp.
+Status da conexão da instância com o WhatsApp.
 
 **Response 200**
 ```json
-{ "connected": true, "phone": "5511999999999" }
+{ "connected": true, "smartphoneConnected": true, "error": null }
 ```
 ```json
-{ "connected": false, "phone": null }
+{ "connected": false, "smartphoneConnected": false, "error": "You are not connected." }
+```
+
+---
+
+## GET /v1/integrations/zapi/qrcode
+
+Retorna o QR code em base64 para escanear com o WhatsApp.  
+⚠️ O QR code expira a cada 20s — fazer polling a cada 10-15s até `connected: true` no status.  
+Retorna `404` se a instância já estiver conectada ou não configurada.
+
+**Response 200**
+```json
+{ "value": "data:image/png;base64,iVBORw0KGgo..." }
+```
+
+---
+
+## POST /v1/integrations/zapi/disconnect
+
+Desconecta o WhatsApp da instância. Para reconectar é necessário escanear o QR code novamente.
+
+**Response 200**
+```json
+{ "disconnected": true }
+```
+
+---
+
+## POST /v1/integrations/zapi/restart
+
+Reinicia a instância Z-API (equivale a um CTRL+ALT+DEL — não desconecta o número).
+
+**Response 200**
+```json
+{ "restarted": true }
 ```
 
 ---

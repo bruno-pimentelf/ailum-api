@@ -191,33 +191,85 @@ export async function registerZapiWebhooks(
   }
 }
 
-// ─── Testar conexão Z-API ─────────────────────────────────────────────────────
+// ─── Helper: busca credenciais Z-API do tenant ────────────────────────────────
 
-export async function testZapiConnection(
+async function getZapiCredentials(
   db: PrismaClient,
   tenantId: string,
-): Promise<{ connected: boolean; phone: string | null }> {
+): Promise<{ instanceId: string; instanceToken: string } | null> {
   const integration = await db.tenantIntegration.findFirst({
     where: { tenantId, provider: 'zapi', isActive: true },
     select: { instanceId: true, apiKeyEncrypted: true },
   })
-
-  if (!integration?.instanceId || !integration.apiKeyEncrypted) {
-    return { connected: false, phone: null }
+  if (!integration?.instanceId || !integration.apiKeyEncrypted) return null
+  return {
+    instanceId: integration.instanceId,
+    instanceToken: decrypt(integration.apiKeyEncrypted),
   }
+}
 
-  const clientToken = decrypt(integration.apiKeyEncrypted)
+// ─── Status da conexão ────────────────────────────────────────────────────────
+
+export async function testZapiConnection(
+  db: PrismaClient,
+  tenantId: string,
+): Promise<{ connected: boolean; smartphoneConnected: boolean; error: string | null }> {
+  const creds = await getZapiCredentials(db, tenantId)
+  if (!creds) return { connected: false, smartphoneConnected: false, error: 'Integração não configurada' }
 
   try {
-    const res = await zapiGet(integration.instanceId, clientToken, '/status')
-    if (!res.ok) return { connected: false, phone: null }
+    const res = await zapiGet(creds.instanceId, creds.instanceToken, '/status')
+    if (!res.ok) return { connected: false, smartphoneConnected: false, error: `Z-API ${res.status}` }
 
-    const body = (await res.json()) as { connected?: boolean; smartphoneConnected?: boolean; session?: string }
+    const body = (await res.json()) as { connected?: boolean; smartphoneConnected?: boolean; error?: string }
     return {
-      connected: body.connected === true || body.smartphoneConnected === true,
-      phone: body.session ?? null,
+      connected: body.connected === true,
+      smartphoneConnected: body.smartphoneConnected === true,
+      error: body.error ?? null,
     }
   } catch {
-    return { connected: false, phone: null }
+    return { connected: false, smartphoneConnected: false, error: 'Falha de conexão' }
   }
+}
+
+// ─── QR Code ──────────────────────────────────────────────────────────────────
+
+export async function getZapiQrCode(
+  db: PrismaClient,
+  tenantId: string,
+): Promise<{ value: string } | null> {
+  const creds = await getZapiCredentials(db, tenantId)
+  if (!creds) return null
+
+  const res = await zapiGet(creds.instanceId, creds.instanceToken, '/qr-code/image')
+  if (!res.ok) return null
+
+  const body = (await res.json()) as { value?: string }
+  return body.value ? { value: body.value } : null
+}
+
+// ─── Desconectar instância ────────────────────────────────────────────────────
+
+export async function disconnectZapiInstance(
+  db: PrismaClient,
+  tenantId: string,
+): Promise<boolean> {
+  const creds = await getZapiCredentials(db, tenantId)
+  if (!creds) return false
+
+  const res = await zapiGet(creds.instanceId, creds.instanceToken, '/disconnect')
+  return res.ok
+}
+
+// ─── Reiniciar instância ──────────────────────────────────────────────────────
+
+export async function restartZapiInstance(
+  db: PrismaClient,
+  tenantId: string,
+): Promise<boolean> {
+  const creds = await getZapiCredentials(db, tenantId)
+  if (!creds) return false
+
+  const res = await zapiGet(creds.instanceId, creds.instanceToken, '/restart')
+  return res.ok
 }
