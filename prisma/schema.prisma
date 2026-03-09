@@ -473,6 +473,7 @@ model Contact {
   lastPaymentStatus     String?
   assignedProfessionalId String?      @db.Uuid
   assignedProfessional  Professional? @relation(fields: [assignedProfessionalId], references: [id])
+  photoUrl              String?
   zapiSessionId         String?
   metadata              Json?
   isActive              Boolean       @default(true)

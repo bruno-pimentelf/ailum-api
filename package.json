@@ -5,11 +5,13 @@
   "main": "index.js",
   "scripts": {
     "dev": "tsx watch --env-file=.env src/server.ts",
+    "dev:prod-db": "tsx watch --env-file=.env.production.local src/server.ts",
     "build": "tsc",
     "start": "tsx src/server.ts",
     "db:migrate": "prisma migrate dev",
     "db:migrate:prod": "tsx node_modules/prisma/build/index.js migrate deploy",
     "db:studio": "prisma studio",
+    "db:studio:prod": "dotenv -e .env.production.local -- prisma studio",
     "db:generate": "prisma generate",
     "db:seed": "tsx prisma/seed.ts"
   },

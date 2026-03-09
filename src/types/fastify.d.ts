@@ -1,6 +1,7 @@
 import type { PrismaClient } from '../generated/prisma/client.js'
 import type { Redis } from 'ioredis'
 import type { FirebaseDecorator } from '../plugins/firebase.js'
+import type { Storage } from 'firebase-admin/storage'
 import type { MemberRole } from '../generated/prisma/client.js'
 import type { Permission } from '../constants/permissions.js'
 

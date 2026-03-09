@@ -91,6 +91,7 @@ export class FirebaseSyncService {
       name: string | null
       phone: string
       status: string
+      photoUrl?: string | null
     },
   ): Promise<void> {
     if (!this.isEnabled) return
@@ -125,6 +126,9 @@ export class FirebaseSyncService {
         previewUpdate['contactName'] = contactMeta.name
         previewUpdate['contactPhone'] = contactMeta.phone
         previewUpdate['status'] = contactMeta.status
+        if (contactMeta.photoUrl) {
+          previewUpdate['photoUrl'] = contactMeta.photoUrl
+        }
       }
 
       batch.set(contactDocRef, previewUpdate, { merge: true })

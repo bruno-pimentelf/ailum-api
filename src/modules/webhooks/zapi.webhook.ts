@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { agentQueue } from '../../jobs/queues.js'
+import { agentQueue, photoSyncQueue } from '../../jobs/queues.js'
 import { FirebaseSyncService } from '../../services/firebase-sync.service.js'
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -382,10 +382,19 @@ function extractContent(payload: ZapiReceivedPayload): ExtractedMessage | null {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async function findTenantByInstance(fastify: FastifyInstance, instanceId: string) {
-  return fastify.db.tenantIntegration.findFirst({
+  const integration = await fastify.db.tenantIntegration.findFirst({
     where: { instanceId, provider: 'zapi', isActive: true },
     select: { tenantId: true },
   })
+
+  if (!integration) {
+    fastify.log.warn(
+      { instanceId },
+      'zapi:webhook:tenant_not_found_for_instance',
+    )
+  }
+
+  return integration
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -438,6 +447,9 @@ async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPay
       ? payload.senderName
       : (payload.chatName ?? null)
 
+  // senderPhoto vem no payload — URL temporária do WhatsApp (expira em 48h)
+  const senderPhoto = !payload.fromMe ? (payload.senderPhoto ?? null) : null
+
   const contact = await fastify.db.contact.upsert({
     where: { tenantId_phone: { tenantId, phone } },
     update: {
@@ -449,10 +461,31 @@ async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPay
       tenantId,
       phone,
       name: contactName,
+      photoUrl: senderPhoto,
       status: 'NEW_LEAD',
       lastMessageAt: new Date(),
     },
+    select: {
+      id: true,
+      phone: true,
+      name: true,
+      status: true,
+      photoUrl: true,
+    },
   })
+
+  // Enfileira sync de foto em background se:
+  // 1. O contato tem foto no WhatsApp (senderPhoto presente), E
+  // 2. A foto ainda não foi migrada para o Firebase Storage (não começa com storage.googleapis.com)
+  const needsPhotoSync = senderPhoto && !contact.photoUrl?.startsWith('https://storage.googleapis.com')
+  if (needsPhotoSync) {
+    await photoSyncQueue.add(
+      'sync-photo',
+      { tenantId, contactId: contact.id },
+      // jobId único por contato — evita filas duplicadas para o mesmo contato
+      { jobId: `photo:${contact.id}`, delay: 2000 },
+    )
+  }
 
   const { content, type, metadata } = extracted
   const role = payload.fromMe ? 'OPERATOR' : 'CONTACT'
@@ -491,6 +524,7 @@ async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPay
       name: contact.name,
       phone: contact.phone,
       status: contact.status,
+      photoUrl: senderPhoto ?? contact.photoUrl ?? undefined,
     },
   )
 
@@ -642,7 +676,8 @@ export async function zapiWebhookRoutes(fastify: FastifyInstance) {
 
     const payload = request.body as ZapiPayload
 
-    fastify.log.debug(
+    // info para ser visível em prod (LOG_LEVEL=info)
+    fastify.log.info(
       { type: payload.type, instanceId: payload.instanceId },
       'zapi:webhook:received',
     )

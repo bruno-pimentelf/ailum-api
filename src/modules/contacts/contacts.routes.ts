@@ -15,6 +15,7 @@ import {
   updateContact,
 } from './contacts.service.js'
 import { PERMISSIONS } from '../../constants/permissions.js'
+import { syncContactPhoto } from '../../services/contact-photo.service.js'
 
 export async function contactsRoutes(fastify: FastifyInstance) {
   fastify.get(
@@ -89,5 +90,30 @@ export async function contactsRoutes(fastify: FastifyInstance) {
       schema: { params: ContactParamsSchema },
     },
     async (req) => softDeleteContact(fastify.db, req.tenantId, (req.params as { id: string }).id),
+  )
+
+  // POST /v1/contacts/:id/sync-photo
+  // Busca a foto atual do contato na Z-API, faz upload para o Firebase Storage
+  // e atualiza o Postgres + Firestore com a URL permanente.
+  // O front não precisa usar o retorno — o onSnapshot do Firestore já atualiza.
+  fastify.post(
+    '/:id/sync-photo',
+    {
+      onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.CONTACTS_WRITE)],
+      schema: { params: ContactParamsSchema },
+    },
+    async (req, reply) => {
+      const { id } = req.params as { id: string }
+      const photoUrl = await syncContactPhoto(
+        fastify.db,
+        fastify.firebase.storage,
+        fastify.firebase.firestore,
+        fastify.log,
+        req.tenantId,
+        id,
+      )
+      if (!photoUrl) return reply.status(204).send()
+      return { photoUrl }
+    },
   )
 }

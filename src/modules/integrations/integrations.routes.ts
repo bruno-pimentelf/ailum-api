@@ -39,10 +39,12 @@ export async function integrationsRoutes(fastify: FastifyInstance) {
       fastify.log,
     )
 
-    // Garante que o doc do tenant existe no Firestore imediatamente,
-    // sem esperar o primeiro webhook chegar para criá-lo.
+    // Consulta o status real da instância na Z-API e já inicializa o doc
+    // do tenant no Firestore com o valor correto (connected ou não),
+    // sem depender do primeiro webhook para criar o documento.
+    const status = await testZapiConnection(fastify.db, req.tenantId)
     const sync = new FirebaseSyncService(fastify.firebase.firestore, fastify.log)
-    await sync.syncInstanceStatus(req.tenantId, false)
+    await sync.syncInstanceStatus(req.tenantId, status.connected, status.error ?? undefined)
 
     return reply.status(200).send({
       ...result,

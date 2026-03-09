@@ -40,6 +40,9 @@ export async function buildApp(): Promise<FastifyInstance> {
       }),
     },
     trustProxy: true,
+    // base64 de imagem/audio/video pode ser grande — 25mb cobre a maioria dos casos
+    // (WhatsApp limita imagem a ~16mb, audio a ~16mb, video a ~64mb via URL)
+    bodyLimit: 25 * 1024 * 1024,
   })
 
   // ── Security ───────────────────────────────────────────────────────────────

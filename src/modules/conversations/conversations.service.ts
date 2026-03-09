@@ -78,11 +78,15 @@ export async function sendOperatorMessage(
     where: { id: contactId, tenantId },
     select: { id: true, phone: true, name: true, status: true },
   })
-  if (!contact) throw new Error('Contact not found')
+  if (!contact) {
+    throw Object.assign(new Error('Contact not found'), { statusCode: 404 })
+  }
 
   // Busca credenciais Z-API do tenant
   const zapiConfig = await getZapiConfig(tenantId, db)
-  if (!zapiConfig) throw new Error('Z-API integration not configured')
+  if (!zapiConfig) {
+    throw Object.assign(new Error('Z-API integration not configured for this tenant'), { statusCode: 503 })
+  }
 
   const { instanceId, clientToken } = zapiConfig
   const phone = contact.phone

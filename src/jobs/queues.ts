@@ -46,4 +46,15 @@ export const memoryQueue = new Queue('memory-consolidation', {
   },
 })
 
-export const allQueues = [agentQueue, triggerQueue, reminderQueue, pixExpireQueue, memoryQueue]
+/** Downloads contact profile photos from Z-API and uploads to Firebase Storage */
+export const photoSyncQueue = new Queue('photo-sync', {
+  connection,
+  defaultJobOptions: {
+    ...defaultJobOptions,
+    attempts: 3,
+    // Fotos são baixa prioridade — delay de 2s para não competir com mensagens
+    delay: 2000,
+  },
+})
+
+export const allQueues = [agentQueue, triggerQueue, reminderQueue, pixExpireQueue, memoryQueue, photoSyncQueue]
