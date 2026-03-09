@@ -1,6 +1,5 @@
 import type { PrismaClient } from '../../generated/prisma/client.js'
 import type { FastifyInstance } from 'fastify'
-import { sendInvitationEmail } from '../../services/email.service.js'
 
 export async function listMembers(db: PrismaClient, tenantId: string) {
   const members = await db.tenantMember.findMany({
@@ -11,7 +10,7 @@ export async function listMembers(db: PrismaClient, tenantId: string) {
     },
   })
 
-  const userIds = members.map((m) => m.userId).filter(Boolean)
+  const userIds = members.map((m) => m.userId).filter((id) => id && id.length > 0)
   const users = await db.user.findMany({
     where: { id: { in: userIds } },
     select: { id: true, name: true, email: true, image: true },
@@ -24,41 +23,66 @@ export async function listMembers(db: PrismaClient, tenantId: string) {
   }))
 }
 
+export async function listInvitations(db: PrismaClient, tenantId: string) {
+  const tenant = await db.tenant.findFirst({ where: { id: tenantId }, select: { clerkOrgId: true } })
+  if (!tenant) return []
+
+  const invitations = await db.invitation.findMany({
+    where: { organizationId: tenant.clerkOrgId },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, email: true, role: true, status: true, expiresAt: true, createdAt: true },
+  })
+
+  const extras = await db.invitationExtra.findMany({
+    where: { invitationId: { in: invitations.map((i) => i.id) } },
+    select: { invitationId: true, role: true },
+  })
+  const extraMap = new Map(extras.map((e) => [e.invitationId, e]))
+
+  const roleMap: Record<string, string> = { admin: 'ADMIN', owner: 'ADMIN', member: 'Membro' }
+
+  return invitations.map((inv) => {
+    const extra = extraMap.get(inv.id)
+    const role = extra?.role ?? roleMap[inv.role ?? ''] ?? inv.role ?? 'Membro'
+    const isExpired = inv.status === 'pending' && new Date(inv.expiresAt) < new Date()
+    const status = isExpired ? 'expired' : inv.status
+    return { ...inv, role, status }
+  })
+}
+
 export async function inviteMember(
   db: PrismaClient,
   fastify: FastifyInstance,
   tenantId: string,
-  inviterUserId: string,
   body: { email: string; role: string; professionalId?: string },
+  headers: HeadersInit,
 ) {
-  // Get tenant info for the invitation email
-  const tenant = await db.tenant.findFirst({ where: { id: tenantId } })
+  const tenant = await db.tenant.findFirst({ where: { id: tenantId }, select: { clerkOrgId: true } })
   if (!tenant) throw fastify.httpErrors.notFound('Tenant not found')
 
-  const inviter = await db.user.findFirst({ where: { id: inviterUserId } })
+  // Better Auth aceita apenas owner|admin|member; mapeamos nossos roles
+  const roleForAuth = body.role === 'ADMIN' ? 'admin' : 'member'
 
-  // Create invitation via Better Auth — we use their internal invitation flow.
-  // This endpoint stores the invitation and fires the email.
-  const inviteLink = `${process.env['WEB_URL'] ?? 'https://app.ailum.com.br'}/invite?org=${tenant.slug}`
-
-  await sendInvitationEmail({
-    to: body.email,
-    inviterName: inviter?.name ?? 'Administrador',
-    organizationName: tenant.name,
-    inviteLink,
-  })
-
-  // Record invitation in tenant_members as inactive until accepted
-  return db.tenantMember.create({
-    data: {
-      tenantId,
-      userId: '',              // empty until the user accepts and their userId is known
-      role: body.role as never,
-      professionalId: body.professionalId ?? null,
-      isActive: false,
-      invitedBy: inviterUserId,
+  const result = await fastify.auth.api.createInvitation({
+    body: {
+      email: body.email,
+      role: roleForAuth,
+      organizationId: tenant.clerkOrgId,
     },
+    headers,
   })
+
+  if (!result?.id) {
+    throw fastify.httpErrors.badRequest('Failed to create invitation')
+  }
+
+  await db.invitationExtra.upsert({
+    where: { invitationId: result.id },
+    create: { invitationId: result.id, role: body.role, professionalId: body.professionalId ?? null },
+    update: { role: body.role, professionalId: body.professionalId ?? null },
+  })
+
+  return { id: result.id, email: body.email, role: body.role, status: 'pending' }
 }
 
 export async function updateMemberRole(

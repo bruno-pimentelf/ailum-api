@@ -31,10 +31,59 @@ async function authPlugin(fastify: FastifyInstance) {
             to: data.email,
             inviterName: data.inviter.user.name,
             organizationName: data.organization.name,
-            inviteLink: `${env.WEB_URL}/invite/${data.id}`,
+            inviteLink: `${env.WEB_URL}/invite/${data.id}?email=${encodeURIComponent(data.email)}`,
           })
         },
         organizationHooks: {
+          afterAcceptInvitation: async ({ invitation, member, organization }) => {
+            try {
+              const tenant = await fastify.db.tenant.findUnique({
+                where: { clerkOrgId: organization.id },
+                select: { id: true },
+              })
+              if (!tenant) {
+                fastify.log.warn({ orgId: organization.id }, 'auth:afterAcceptInvitation:tenant_not_found')
+                return
+              }
+
+              const extra = await fastify.db.invitationExtra.findUnique({
+                where: { invitationId: invitation.id },
+                select: { professionalId: true, role: true },
+              })
+
+              const roleMap: Record<string, MemberRole> = {
+                admin: 'ADMIN',
+                owner: 'ADMIN',
+                professional: 'PROFESSIONAL',
+                secretary: 'SECRETARY',
+                member: 'SECRETARY',
+                ADMIN: 'ADMIN',
+                PROFESSIONAL: 'PROFESSIONAL',
+                SECRETARY: 'SECRETARY',
+              }
+              const role: MemberRole =
+                (extra?.role as MemberRole) ?? roleMap[member.role] ?? 'SECRETARY'
+
+              await fastify.db.tenantMember.create({
+                data: {
+                  id: randomUUID(),
+                  tenantId: tenant.id,
+                  userId: member.userId,
+                  role,
+                  professionalId: extra?.professionalId ?? null,
+                  isActive: true,
+                  joinedAt: new Date(),
+                },
+              })
+              fastify.log.info({ tenantId: tenant.id, userId: member.userId }, 'auth:member:tenant_member_created_via_invite')
+
+              if (extra) {
+                await fastify.db.invitationExtra.delete({ where: { invitationId: invitation.id } })
+              }
+            } catch (err) {
+              fastify.log.error({ err, invitationId: invitation.id }, 'auth:afterAcceptInvitation:error')
+            }
+          },
           afterCreateOrganization: async ({ organization: org, member }) => {
             try {
               // 1. Cria o tenant espelho
@@ -181,6 +230,7 @@ async function authPlugin(fastify: FastifyInstance) {
       }
     }
 
+  fastify.decorate('auth', auth)
   fastify.decorate('authenticate', authenticate)
   fastify.decorate('authorize', authorize)
 }

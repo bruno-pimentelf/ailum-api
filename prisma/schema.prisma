@@ -195,6 +195,18 @@ model Invitation {
   @@map("invitation")
 }
 
+/// Armazena professionalId e role do Ailum — usado em afterAcceptInvitation
+/// (Better Auth usa admin/member; nosso role é ADMIN/PROFESSIONAL/SECRETARY)
+model InvitationExtra {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invitationId   String   @unique
+  professionalId String?  @db.Uuid
+  role           String   // ADMIN | PROFESSIONAL | SECRETARY
+  createdAt      DateTime @default(now()) @db.Timestamptz
+
+  @@map("invitation_extras")
+}
+
 // ─────────────────────────────────────────────
 // TENANT (espelho da Organization com configs extras)
 // ─────────────────────────────────────────────

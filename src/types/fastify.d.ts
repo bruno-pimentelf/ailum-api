@@ -10,6 +10,7 @@ declare module 'fastify' {
     db: PrismaClient
     redis: Redis
     firebase: FirebaseDecorator
+    auth: { api: { createInvitation: (opts: { body: { email: string; role: string; organizationId?: string }; headers: HeadersInit }) => Promise<{ id: string } | null | undefined> } }
 
     /**
      * Extracts the Better Auth session from the request and decorates

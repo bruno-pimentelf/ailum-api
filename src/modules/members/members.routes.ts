@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { MemberParamsSchema, InviteMemberSchema, UpdateMemberSchema } from './members.schema.js'
-import { listMembers, inviteMember, updateMemberRole, removeMember } from './members.service.js'
+import { listMembers, listInvitations, inviteMember, updateMemberRole, removeMember } from './members.service.js'
 import { PERMISSIONS } from '../../constants/permissions.js'
 
 export async function membersRoutes(fastify: FastifyInstance) {
@@ -8,12 +8,16 @@ export async function membersRoutes(fastify: FastifyInstance) {
     onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.MEMBERS_READ)],
   }, async (req) => listMembers(fastify.db, req.tenantId))
 
+  fastify.get('/invitations', {
+    onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.MEMBERS_READ)],
+  }, async (req) => listInvitations(fastify.db, req.tenantId))
+
   fastify.post('/invite', {
     onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.MEMBERS_WRITE)],
     schema: { body: InviteMemberSchema },
   }, async (req, reply) => {
-    const result = await inviteMember(fastify.db, fastify, req.tenantId, req.userId, req.body as never)
-    req.log.info({ memberId: result.id }, 'member:invited')
+    const result = await inviteMember(fastify.db, fastify, req.tenantId, req.body as never, req.headers)
+    req.log.info({ invitationId: result.id }, 'member:invited')
     return reply.status(201).send(result)
   })
 

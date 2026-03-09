@@ -36,6 +36,8 @@ DELETE /v1/members/:id          → remove membro (soft delete)
 
 ## POST /v1/members/invite
 
+Usa o fluxo de convite do Better Auth: envia email via Resend, cria invitation. O usuário recebe link `{WEB_URL}/invite/{invitationId}`.
+
 ```json
 {
   "email": "joao@clinica.com",
@@ -44,7 +46,9 @@ DELETE /v1/members/:id          → remove membro (soft delete)
 }
 ```
 
-Envia email de convite. O membro fica `isActive: false` até aceitar.
+**Resposta (201):** `{ id, email, role, status: "pending" }` (id = invitationId)
+
+**Fluxo no front:** Página `/invite/[id]` — usuário faz login ou sign up com o mesmo email, depois chama `authClient.organization.acceptInvitation({ invitationId: id })`. Ao aceitar, o backend cria o TenantMember automaticamente via hook.
 
 ---
 
