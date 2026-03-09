@@ -114,10 +114,24 @@ export async function runStageAgent(
           ? `PROFISSIONAIS DISPONÍVEIS HOJE:\n${context.availableProfessionals
               .map(
                 (p) =>
-                  `- ${p.fullName}${p.specialty ? ` (${p.specialty})` : ''}: ${p.slots.map((s) => s.time).join(', ')}`,
+                  `- ${p.fullName}${p.specialty ? ` (${p.specialty})` : ''} [id=${p.id}]: ${p.slots.map((s) => s.time).join(', ')}`,
               )
               .join('\n')}`
           : 'Não há profissionais disponíveis hoje.',
+    },
+
+    // Layer 5b — services available for scheduling (dynamic)
+    {
+      type: 'text',
+      text:
+        context.availableServices.length > 0
+          ? `SERVIÇOS PARA AGENDAMENTO:\n${context.availableServices
+              .map(
+                (s) =>
+                  `- ${s.name} (${s.durationMin}min, R$ ${Number(s.price).toFixed(2)}) [id=${s.id}]`,
+              )
+              .join('\n')}`
+          : 'Não há serviços disponíveis para agendamento.',
     },
 
     // Layer 6 — contact memories (dynamic)
@@ -132,10 +146,26 @@ export async function runStageAgent(
         ]
       : []),
 
-    // Layer 7 — stage context summary for the agent (dynamic)
+    // Layer 7 — funnel stages (para move_stage)
+    ...(context.funnelStages?.length
+      ? [
+          {
+            type: 'text',
+            text: `STAGES DO FUNIL (use move_stage para avançar o contato):\n${context.funnelStages
+              .map((s) => `- ${s.name} [id=${s.id}]`)
+              .join('\n')}\nStage atual: ${context.stage?.name ?? '—'}`,
+          } as TextBlockParam,
+        ]
+      : []),
+
+    // Layer 8 — stage context summary for the agent (dynamic)
     {
       type: 'text',
       text: [
+        `DATA E HORÁRIO ATUAIS: ${context.currentDate} às ${context.currentTime}. Slots no contexto já excluem horários passados.`,
+        allowedToolNames.includes('search_availability')
+          ? `search_availability: Quando o usuário indicar um DIA (amanhã, terça, 10/03), chame search_availability com date em YYYY-MM-DD. Use os IDs retornados para create_appointment. Amanhã = ${context.tomorrowDateIso}. Se não há slots hoje, ofereça amanhã e chame a tool.`
+          : '',
         `INTENÇÃO DETECTADA: ${routing.intent} (confiança: ${routing.confidence})`,
         context.contact.name ? `NOME DO CONTATO: ${context.contact.name}` : '',
         context.nextAppointment
@@ -147,6 +177,13 @@ export async function runStageAgent(
         allowedToolNames.length > 0
           ? `FERRAMENTAS DISPONÍVEIS: ${allowedToolNames.join(', ')}`
           : 'Nenhuma ferramenta disponível neste stage — responda apenas com texto.',
+        allowedToolNames.includes('create_appointment')
+          ? `REGRA create_appointment: Quando INTENÇÃO = CONFIRMING e você tiver horário + profissional + serviço, chame create_appointment. Use SEMPRE os IDs retornados por search_availability (ou PROFISSIONAIS DISPONÍVEIS HOJE se for hoje).
+scheduled_at: ISO 8601 com -03:00. Data: ${context.currentDate} (hoje) ou a data que o usuário escolheu. Ex: ${context.currentDateIsoExample}. Horas 00-23, minutos 00-59. "9:99" → corrija para 09:00.`
+          : '',
+        allowedToolNames.includes('move_stage')
+          ? 'move_stage: Avance o contato para Qualificado quando demonstrar interesse em agendar. Após create_appointment o sistema move automaticamente para Consulta Agendada.'
+          : '',
       ]
         .filter(Boolean)
         .join('\n'),
@@ -164,6 +201,20 @@ export async function runStageAgent(
         input_schema: def.input_schema as Anthropic.Tool['input_schema'],
       }
     })
+
+  // Determine tool_choice strategy based on intent (threshold 0.7 so CONFIRMING reliably triggers create_appointment)
+  const shouldForceToolUse =
+    tools.length > 0 &&
+    routing.intent === 'CONFIRMING' &&
+    routing.confidence >= 0.7 &&
+    allowedToolNames.includes('create_appointment')
+
+  const toolChoice: Anthropic.MessageCreateParams['tool_choice'] =
+    !tools.length
+      ? undefined
+      : shouldForceToolUse
+        ? { type: 'any' }
+        : { type: 'auto' }
 
   // Build conversation messages
   const conversationMessages: MessageParam[] = [
@@ -185,13 +236,16 @@ export async function runStageAgent(
   let finalReply = ''
 
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
+    // Only force tool use on the first iteration; subsequent iterations use auto
+    const iterationToolChoice = iteration === 0 ? toolChoice : (tools.length > 0 ? { type: 'auto' as const } : undefined)
+
     const response = await anthropic.messages.create({
       model,
       max_tokens: 1000,
       temperature,
       system: systemBlocks as Anthropic.TextBlockParam[],
       tools: tools.length > 0 ? tools : undefined,
-      tool_choice: tools.length > 0 ? { type: 'auto' } : undefined,
+      tool_choice: iterationToolChoice,
       messages: currentMessages,
     })
 

@@ -211,11 +211,10 @@ async function main() {
       agentName: 'Ailum',
       agentPersonality:
         'Você é Ailum, assistente virtual da clínica. Seja calorosa e acolhedora. ' +
-        'Seu objetivo é qualificar o lead: descobrir o nome, o motivo do contato e se está buscando consulta.',
+        'Qualifique o lead e facilite o agendamento. Quando tiver profissional, serviço e horário acordados, use create_appointment.',
       stageContext:
-        'O contato acabou de chegar. Apresente a clínica, pergunte o nome e o motivo do contato. ' +
-        'Se demonstrar interesse em consulta, mova para Qualificado.',
-      allowedTools: ['move_stage', 'send_message', 'notify_operator'],
+        'Contato inicial. Apresente a clínica, profissionais e serviços. Quando o contato escolher horário e confirmar, chame create_appointment. Use os IDs do contexto (profissionais e serviços).',
+      allowedTools: ['search_availability', 'create_appointment', 'move_stage', 'send_message', 'notify_operator'],
     },
     {
       name: 'Qualificado',
@@ -225,11 +224,10 @@ async function main() {
       agentName: 'Ailum',
       agentPersonality:
         'Você está conversando com alguém interessado em consulta. ' +
-        'Seja entusiasmada e facilite o agendamento. Mostre disponibilidade e valor.',
+        'Seja entusiasmada e facilite o agendamento. Mostre disponibilidade e valor. Quando confirmar, chame create_appointment.',
       stageContext:
-        'O lead está qualificado. Apresente os serviços disponíveis e a agenda da Dra. Ana. ' +
-        'Ofereça horários disponíveis e ajude a agendar.',
-      allowedTools: ['create_appointment', 'move_stage', 'send_message', 'notify_operator'],
+        'Lead qualificado. Apresente serviços e agenda. Quando o contato escolher horário e confirmar, chame create_appointment com os IDs do contexto.',
+      allowedTools: ['search_availability', 'create_appointment', 'move_stage', 'send_message', 'notify_operator'],
     },
     {
       name: 'Consulta Agendada',
@@ -239,11 +237,10 @@ async function main() {
       agentName: 'Ailum',
       agentPersonality:
         'O paciente tem uma consulta agendada. Seja confirmadora e apoiadora. ' +
-        'Envie lembretes amigáveis e responda dúvidas sobre a consulta.',
+        'Envie lembretes amigáveis e responda dúvidas sobre a consulta. Pagamento será tratado na clínica.',
       stageContext:
-        'Paciente com consulta agendada. Confirme o agendamento, envie endereço da clínica se pedido. ' +
-        'Se precisar de cobrança antecipada, gere o PIX.',
-      allowedTools: ['generate_pix', 'move_stage', 'send_message', 'notify_operator'],
+        'Paciente com consulta agendada. Confirme o agendamento, envie endereço da clínica se pedido. Não mencione cobrança via PIX (ainda não integrado).',
+      allowedTools: ['move_stage', 'send_message', 'notify_operator'],
     },
     {
       name: 'Atendido',
@@ -257,7 +254,7 @@ async function main() {
       stageContext:
         'Paciente que já foi atendido. Agradeça, pergunte como foi a consulta. ' +
         'Ofereça agendamento de retorno se apropriado.',
-      allowedTools: ['create_appointment', 'send_message', 'notify_operator'],
+      allowedTools: ['search_availability', 'create_appointment', 'send_message', 'notify_operator'],
     },
   ]
 

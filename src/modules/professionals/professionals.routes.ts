@@ -48,18 +48,27 @@ export async function professionalsRoutes(fastify: FastifyInstance) {
   }, async (req) => getProfessionalAvailabilitySchedule(fastify.db, req.tenantId, (req.params as { id: string }).id))
 
   fastify.put('/:id/availability', {
-    onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.PROFESSIONALS_WRITE)],
+    onRequest: [
+      fastify.authenticate,
+      fastify.authorizeProfessionalWrite((req) => (req.params as { id: string }).id),
+    ],
     schema: { params: ProfessionalParamsSchema, body: SetAvailabilitySchema },
   }, async (req) => setProfessionalAvailability(fastify.db, req.tenantId, (req.params as { id: string }).id, req.body as never))
 
   // ── Exceptions ──────────────────────────────────────────────────────────────
   fastify.post('/:id/exceptions', {
-    onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.PROFESSIONALS_WRITE)],
+    onRequest: [
+      fastify.authenticate,
+      fastify.authorizeProfessionalWrite((req) => (req.params as { id: string }).id),
+    ],
     schema: { params: ProfessionalParamsSchema, body: AddExceptionSchema },
   }, async (req, reply) => reply.status(201).send(await addAvailabilityException(fastify.db, req.tenantId, (req.params as { id: string }).id, req.body as never)))
 
   fastify.delete('/:id/exceptions/:date', {
-    onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.PROFESSIONALS_WRITE)],
+    onRequest: [
+      fastify.authenticate,
+      fastify.authorizeProfessionalWrite((req) => (req.params as { id: string }).id),
+    ],
     schema: { params: ExceptionDateParamsSchema },
   }, async (req) => {
     const { id, date } = req.params as { id: string; date: string }

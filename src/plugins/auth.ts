@@ -5,7 +5,7 @@ import { betterAuth } from 'better-auth'
 import { prismaAdapter } from '@better-auth/prisma-adapter'
 import { organization } from 'better-auth/plugins'
 import { env } from '../config/env.js'
-import { ROLE_PERMISSIONS, type Permission } from '../constants/permissions.js'
+import { PERMISSIONS, ROLE_PERMISSIONS, type Permission } from '../constants/permissions.js'
 import type { MemberRole } from '../generated/prisma/client.js'
 import { sendInvitationEmail } from '../services/email.service.js'
 
@@ -230,9 +230,30 @@ async function authPlugin(fastify: FastifyInstance) {
       }
     }
 
+  /**
+   * Allow if ADMIN (PROFESSIONALS_WRITE) or PROFESSIONAL editing own (PROFESSIONALS_WRITE_OWN + params.id === professionalId).
+   * Use for PUT availability, POST/DELETE exceptions, etc.
+   */
+  const authorizeProfessionalWrite =
+    (getProfessionalId: (req: FastifyRequest) => string) =>
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const hasFull = ROLE_PERMISSIONS[request.role]?.includes(PERMISSIONS.PROFESSIONALS_WRITE)
+      if (hasFull) return
+
+      const hasOwn = ROLE_PERMISSIONS[request.role]?.includes(PERMISSIONS.PROFESSIONALS_WRITE_OWN)
+      const professionalId = getProfessionalId(request)
+      if (hasOwn && request.professionalId && request.professionalId === professionalId) return
+
+      return reply.status(403).send({
+        error: 'Insufficient permissions',
+        required: 'professionals:write or professionals:write_own (own profile only)',
+      })
+    }
+
   fastify.decorate('auth', auth)
   fastify.decorate('authenticate', authenticate)
   fastify.decorate('authorize', authorize)
+  fastify.decorate('authorizeProfessionalWrite', authorizeProfessionalWrite)
 }
 
 export default fp(authPlugin, { name: 'auth', dependencies: ['db'] })

@@ -42,6 +42,138 @@ export async function deleteFunnel(db: PrismaClient, tenantId: string, id: strin
   return db.funnel.update({ where: { id, tenantId }, data: { isActive: false } })
 }
 
+// ─── Default funnel (para tenants sem fluxo configurado) ────────────────────────
+
+const DEFAULT_STAGES = [
+  {
+    name: 'Novo Lead',
+    color: '#64748b',
+    order: 0,
+    isTerminal: false,
+    agentName: 'Ailum',
+    agentPersonality:
+      'Você é Ailum, assistente virtual da clínica. Seja calorosa e acolhedora. ' +
+      'Qualifique o lead e facilite o agendamento. Quando tiver profissional, serviço e horário acordados, use create_appointment.',
+    stageContext:
+      'Contato inicial. Apresente a clínica, profissionais e serviços. Quando o contato escolher horário e confirmar, chame create_appointment. Use os IDs do contexto (profissionais e serviços).',
+    allowedTools: ['search_availability', 'create_appointment', 'move_stage', 'send_message', 'notify_operator'],
+  },
+  {
+    name: 'Qualificado',
+    color: '#3b82f6',
+    order: 1,
+    isTerminal: false,
+    agentName: 'Ailum',
+    agentPersonality:
+      'Você está conversando com alguém interessado em consulta. ' +
+      'Seja entusiasmada e facilite o agendamento. Mostre disponibilidade e valor. Quando confirmar, chame create_appointment.',
+    stageContext:
+      'Lead qualificado. Apresente serviços e agenda. Quando o contato escolher horário e confirmar, chame create_appointment com os IDs do contexto.',
+    allowedTools: ['search_availability', 'create_appointment', 'move_stage', 'send_message', 'notify_operator'],
+  },
+  {
+    name: 'Consulta Agendada',
+    color: '#10b981',
+    order: 2,
+    isTerminal: false,
+    agentName: 'Ailum',
+    agentPersonality:
+      'O paciente tem uma consulta agendada. Seja confirmadora e apoiadora. ' +
+      'Envie lembretes amigáveis e responda dúvidas sobre a consulta. Pagamento será tratado na clínica.',
+    stageContext:
+      'Paciente com consulta agendada. Confirme o agendamento, envie endereço da clínica se pedido. Não mencione cobrança via PIX (ainda não integrado).',
+    allowedTools: ['move_stage', 'send_message', 'notify_operator'],
+  },
+  {
+    name: 'Atendido',
+    color: '#8b5cf6',
+    order: 3,
+    isTerminal: true,
+    agentName: 'Ailum',
+    agentPersonality:
+      'O paciente foi atendido. Seja grata e encoraje o retorno. ' +
+      'Pergunte sobre a experiência e ofereça agendar retorno.',
+    stageContext:
+      'Paciente que já foi atendido. Agradeça, pergunte como foi a consulta. Ofereça agendamento de retorno se apropriado.',
+    allowedTools: ['create_appointment', 'send_message', 'notify_operator'],
+  },
+] as const
+
+export async function createDefaultFunnel(db: PrismaClient, tenantId: string) {
+  const tenant = await db.tenant.findFirst({
+    where: { id: tenantId },
+    select: { name: true },
+  })
+  const tenantName = tenant?.name ?? 'a clínica'
+
+  const funnel = await db.funnel.create({
+    data: {
+      tenantId,
+      name: 'Funil Principal',
+      description: 'Funil padrão de atendimento para novos pacientes.',
+      isActive: true,
+      order: 0,
+    },
+  })
+
+  const stages: { id: string; name: string }[] = []
+
+  for (const s of DEFAULT_STAGES) {
+    const stage = await db.stage.create({
+      data: {
+        tenantId,
+        funnelId: funnel.id,
+        name: s.name,
+        color: s.color,
+        order: s.order,
+        isTerminal: s.isTerminal,
+      },
+    })
+    stages.push({ id: stage.id, name: stage.name })
+
+    await db.stageAgentConfig.create({
+      data: {
+        stageId: stage.id,
+        funnelAgentName: s.agentName,
+        funnelAgentPersonality: s.agentPersonality,
+        stageContext: s.stageContext,
+        allowedTools: [...s.allowedTools],
+        model: 'SONNET',
+        temperature: 0.4,
+      },
+    })
+  }
+
+  const novoLeadStage = stages.find((s) => s.name === 'Novo Lead')
+  if (novoLeadStage) {
+    await db.trigger.create({
+      data: {
+        tenantId,
+        stageId: novoLeadStage.id,
+        event: 'STAGE_ENTERED',
+        action: 'SEND_MESSAGE',
+        actionConfig: {
+          useAI: false,
+          message: `Olá! Sou o assistente virtual de ${tenantName} 👋\nFico feliz em receber você! Como posso te ajudar hoje?`,
+        },
+        delayMinutes: 0,
+        cooldownSeconds: 86400,
+        isActive: true,
+      },
+    })
+  }
+
+  return db.funnel.findUniqueOrThrow({
+    where: { id: funnel.id },
+    include: {
+      stages: {
+        orderBy: { order: 'asc' },
+        include: { agentConfig: true },
+      },
+    },
+  })
+}
+
 // ─── Stages ───────────────────────────────────────────────────────────────────
 
 export async function listStages(db: PrismaClient, tenantId: string, funnelId: string) {

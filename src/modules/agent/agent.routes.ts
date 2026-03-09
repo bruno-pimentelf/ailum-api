@@ -72,6 +72,55 @@ export async function agentRoutes(fastify: FastifyInstance) {
   )
 
   /**
+   * POST /v1/agent/playground-reset
+   * Apaga mensagens e memórias do contato de playground. Útil para "zerar" o contexto e testar de novo.
+   * Também remove mensagens do Firestore para o chat sumir no frontend.
+   */
+  fastify.post(
+    '/playground-reset',
+    { onRequest: [fastify.authenticate] },
+    async (request, reply) => {
+      const contact = await getOrCreatePlaygroundContact(fastify, request.tenantId)
+      const messageIds = await fastify.db.message.findMany({
+        where: { contactId: contact.id, tenantId: request.tenantId },
+        select: { id: true },
+      })
+
+      if (fastify.firebase.firestore && messageIds.length > 0) {
+        const BATCH_LIMIT = 500
+        for (let i = 0; i < messageIds.length; i += BATCH_LIMIT) {
+          const chunk = messageIds.slice(i, i + BATCH_LIMIT)
+          const batch = fastify.firebase.firestore.batch()
+          const col = fastify.firebase.firestore
+            .collection('tenants')
+            .doc(request.tenantId)
+            .collection('contacts')
+            .doc(contact.id)
+            .collection('messages')
+          for (const m of chunk) {
+            batch.delete(col.doc(m.id))
+          }
+          await batch.commit()
+        }
+      }
+
+      const [deletedMessages, deletedMemories] = await Promise.all([
+        fastify.db.message.deleteMany({
+          where: { contactId: contact.id, tenantId: request.tenantId },
+        }),
+        fastify.db.agentMemory.deleteMany({
+          where: { contactId: contact.id, tenantId: request.tenantId },
+        }),
+      ])
+      fastify.log.info(
+        { contactId: contact.id, messages: deletedMessages.count, memories: deletedMemories.count },
+        'agent:playground:reset',
+      )
+      return reply.status(204).send()
+    },
+  )
+
+  /**
    * POST /v1/agent/message
    * Enqueues an incoming message for async processing by the agent.
    * Returns 202 immediately with a jobId.

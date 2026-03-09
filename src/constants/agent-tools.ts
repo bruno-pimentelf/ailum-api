@@ -8,6 +8,17 @@ export interface AgentToolDefinition {
 }
 
 export const AGENT_TOOLS = {
+  search_availability: {
+    name: 'search_availability',
+    description:
+      'Search available appointment slots for a specific date. Call when the user mentions a date (e.g. "amanhã", "terça", "10/03"). Returns professionals with their IDs, services with IDs, and available time slots. Use the returned IDs for create_appointment.',
+    input_schema: Type.Object({
+      date: Type.String({
+        description: 'Date in YYYY-MM-DD format (e.g. 2026-03-10 for March 10, 2026)',
+      }),
+    }),
+  },
+
   create_appointment: {
     name: 'create_appointment',
     description:

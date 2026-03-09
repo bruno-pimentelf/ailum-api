@@ -3,6 +3,7 @@ import { FirebaseSyncService } from '../../services/firebase-sync.service.js'
 import { createPixCharge as asaasCreatePixCharge } from '../../services/asaas.service.js'
 import { ZapiService } from '../../services/zapi.service.js'
 import { STATUS_TRANSITIONS } from '../../constants/status-transitions.js'
+import { searchAvailability } from '../../services/availability.service.js'
 import type { AgentContext } from '../../types/context.js'
 
 export interface ToolResult {
@@ -44,6 +45,10 @@ interface SendMessageInput {
   media_url?: string
 }
 
+interface SearchAvailabilityInput {
+  date: string
+}
+
 // ─── Executor ────────────────────────────────────────────────────────────────
 
 export interface ExecuteToolOptions {
@@ -63,6 +68,13 @@ export async function executeToolSafely(
 
   try {
     switch (toolName) {
+      case 'search_availability':
+        return await executeSearchAvailability(
+          input as unknown as SearchAvailabilityInput,
+          context,
+          db,
+        )
+
       case 'create_appointment':
         return await createAppointment(input as unknown as CreateAppointmentInput, context, db, firebaseSync)
 
@@ -98,6 +110,42 @@ export async function executeToolSafely(
   }
 }
 
+// ─── search_availability ──────────────────────────────────────────────────────
+
+async function executeSearchAvailability(
+  input: SearchAvailabilityInput,
+  context: AgentContext,
+  db: FastifyInstance['db'],
+): Promise<ToolResult> {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(input.date.trim())
+  if (!match) {
+    return {
+      success: false,
+      requiresConfirmation: false,
+      reason: `Data inválida: "${input.date}". Use formato YYYY-MM-DD (ex: 2026-03-10).`,
+    }
+  }
+
+  const dateStart = new Date(`${input.date}T12:00:00`)
+  const today = new Date()
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+
+  let minStart: number | undefined
+  if (input.date === todayStr) {
+    minStart = today.getHours() * 60 + today.getMinutes() + 15
+  }
+
+  const result = await searchAvailability(db, context.tenant.id, input.date, {
+    minStartMinutesFromMidnight: minStart,
+  })
+
+  return {
+    success: true,
+    requiresConfirmation: false,
+    data: result,
+  }
+}
+
 // ─── create_appointment ───────────────────────────────────────────────────────
 
 async function createAppointment(
@@ -107,6 +155,13 @@ async function createAppointment(
   sync: FirebaseSyncService,
 ): Promise<ToolResult> {
   const scheduledAt = new Date(input.scheduled_at)
+  if (Number.isNaN(scheduledAt.getTime())) {
+    return {
+      success: false,
+      requiresConfirmation: false,
+      reason: `Data/horário inválido: "${input.scheduled_at}". Use formato ISO: YYYY-MM-DDTHH:mm:ss-03:00 (ex: ${context.currentDateIsoExample}). Horas 00-23, minutos 00-59.`,
+    }
+  }
 
   // Fetch service for duration
   const service = await db.service.findFirst({
@@ -150,18 +205,38 @@ async function createAppointment(
     },
   })
 
-  // Advance contact status
+  await sync.syncAppointment(context.tenant.id, {
+    id: appointment.id,
+    contactId: appointment.contactId,
+    professionalId: appointment.professionalId,
+    serviceId: appointment.serviceId,
+    scheduledAt: appointment.scheduledAt,
+    durationMin: appointment.durationMin,
+    status: appointment.status,
+    notes: appointment.notes,
+  })
+
+  // Advance contact status and move to Consulta Agendada stage if exists
   const newStatus = STATUS_TRANSITIONS['create_appointment']
+  const consultaAgendadaStage = context.funnelStages?.find(
+    (s) => s.name.toLowerCase().includes('consulta') && s.name.toLowerCase().includes('agendad'),
+  )
+  const newStageId = consultaAgendadaStage?.id ?? context.contact.currentStageId
   await db.contact.update({
     where: { id: context.contact.id },
-    data: { status: newStatus, updatedAt: new Date() },
+    data: {
+      status: newStatus,
+      currentStageId: newStageId,
+      stageEnteredAt: consultaAgendadaStage ? new Date() : undefined,
+      updatedAt: new Date(),
+    },
   })
 
   await sync.updateContactPresence({
     tenantId: context.tenant.id,
     contactId: context.contact.id,
     status: newStatus,
-    stageId: context.contact.currentStageId,
+    stageId: newStageId,
     lastMessageAt: new Date(),
   })
 

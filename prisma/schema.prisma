@@ -351,15 +351,16 @@ model AvailabilityException {
 // ─────────────────────────────────────────────
 
 model Service {
-  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId    String   @db.Uuid
-  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name        String
-  description String?
-  durationMin Int      @default(50)
-  price       Decimal  @db.Decimal(10, 2)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now()) @db.Timestamptz
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String   @db.Uuid
+  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name           String
+  description    String?
+  durationMin    Int      @default(50)
+  price          Decimal  @db.Decimal(10, 2)
+  isActive       Boolean  @default(true)
+  isConsultation Boolean  @default(true)
+  createdAt      DateTime @default(now()) @db.Timestamptz
 
   professionalServices ProfessionalService[]
   appointments         Appointment[]

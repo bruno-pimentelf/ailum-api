@@ -38,6 +38,13 @@ export interface AvailableProfessional {
   slots: AvailableSlot[]
 }
 
+export interface ContextService {
+  id: string
+  name: string
+  durationMin: number
+  price: unknown
+}
+
 export interface ContextMessage {
   id: string
   role: string
@@ -68,6 +75,12 @@ export interface ContextFunnel {
   id: string
   name: string
   description: string | null
+}
+
+export interface ContextFunnelStage {
+  id: string
+  name: string
+  order: number
 }
 
 export interface ContextContact {
@@ -133,14 +146,24 @@ export interface ContextZapiIntegration {
  * Full agent context built by context-builder for every agent invocation.
  */
 export interface AgentContext {
+  /** Data atual no servidor (DD/MM/YYYY) para o agente saber "hoje" ao construir scheduled_at */
+  currentDate: string
+  /** Horário atual (HH:mm) — para saber se ainda há slots hoje ou se deve oferecer amanhã */
+  currentTime: string
+  /** Exemplo de scheduled_at ISO para hoje às 09:00 (timezone -03:00) — usar como base para create_appointment */
+  currentDateIsoExample: string
+  /** Amanhã em YYYY-MM-DD para search_availability (ex: 2026-03-10) */
+  tomorrowDateIso: string
   contact: ContextContact
   tenant: ContextTenant
   stage: ContextStage | null
   funnel: ContextFunnel | null
+  funnelStages: ContextFunnelStage[]
   messages: ContextMessage[]
   nextAppointment: ContextAppointment | null
   pendingCharge: ContextCharge | null
   availableProfessionals: AvailableProfessional[]
+  availableServices: ContextService[]
   memories: ContextMemory[]
   asaasIntegration: ContextAsaasIntegration | null
   zapiIntegration: ContextZapiIntegration | null

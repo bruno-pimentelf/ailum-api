@@ -24,6 +24,7 @@ export const PERMISSIONS = {
   // Professionals
   PROFESSIONALS_READ: 'professionals:read',
   PROFESSIONALS_WRITE: 'professionals:write',
+  PROFESSIONALS_WRITE_OWN: 'professionals:write_own',
 
   // Services
   SERVICES_READ: 'services:read',
@@ -60,6 +61,7 @@ export const ROLE_PERMISSIONS: Record<MemberRole, Permission[]> = {
     PERMISSIONS.BILLING_READ,
     PERMISSIONS.FUNNELS_READ,
     PERMISSIONS.PROFESSIONALS_READ,
+    PERMISSIONS.PROFESSIONALS_WRITE_OWN,
     PERMISSIONS.SERVICES_READ,
   ],
 

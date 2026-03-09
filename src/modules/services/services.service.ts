@@ -21,7 +21,13 @@ export async function getServiceById(db: PrismaClient, tenantId: string, id: str
 export async function createService(
   db: PrismaClient,
   tenantId: string,
-  body: { name: string; description?: string; durationMin?: number; price: number },
+  body: {
+    name: string
+    description?: string
+    durationMin?: number
+    price: number
+    isConsultation?: boolean
+  },
 ) {
   return db.service.create({
     data: {
@@ -30,6 +36,7 @@ export async function createService(
       description: body.description,
       durationMin: body.durationMin ?? 50,
       price: body.price,
+      isConsultation: body.isConsultation ?? true,
     },
   })
 }
@@ -38,7 +45,13 @@ export async function updateService(
   db: PrismaClient,
   tenantId: string,
   id: string,
-  body: Partial<{ name: string; description: string; durationMin: number; price: number }>,
+  body: Partial<{
+    name: string
+    description: string
+    durationMin: number
+    price: number
+    isConsultation: boolean
+  }>,
 ) {
   return db.service.update({ where: { id, tenantId }, data: body })
 }

@@ -120,7 +120,12 @@ export async function orchestrate(
     audit.push({
       label: 'Router',
       detail: `Intent: ${routing.intent} (${Math.round((routing.confidence ?? 0) * 100)}% confiança)`,
-      data: { intent: routing.intent, confidence: routing.confidence },
+      data: {
+        intent: routing.intent,
+        confidence: routing.confidence,
+        stage: context.stage?.name ?? null,
+        funnel: context.funnel?.name ?? null,
+      },
     })
 
     // 4. Escalate if needed
@@ -152,8 +157,8 @@ export async function orchestrate(
 
     audit.push({ label: 'Escalação', detail: 'Não necessária' })
 
-    // 5. Check trigger match — look for triggers in current stage that match intent
-    if (context.stage && routing.confidence > 0.85) {
+    // 5. Check trigger match — look for triggers in current stage that match intent (threshold 0.75)
+    if (context.stage && routing.confidence > 0.75) {
       const matchingTrigger = await fastify.db.trigger.findFirst({
         where: {
           stageId: context.stage.id,
@@ -222,9 +227,16 @@ export async function orchestrate(
 
       audit.push({
         label: 'Stage Agent',
-        detail: `${stageResult.toolCalls.length} tool(s) — confirmação pendente`,
+        detail: `${stageResult.toolCalls.length} tool(s) — confirmação pendente: ${stageResult.toolCalls.map((t) => t.name).join(', ')}`,
         data: {
           tools: stageResult.toolCalls.map((t) => t.name),
+          toolExecutions: stageResult.toolCalls.map((t) => ({
+            tool: t.name,
+            input: summarizeToolInput(t.name, t.input),
+            success: t.result.success,
+            reason: t.result.reason,
+            summary: summarizeToolResult(t.name, t.result),
+          })),
           inputTokens: stageResult.inputTokens,
           outputTokens: stageResult.outputTokens,
         },
@@ -254,10 +266,17 @@ export async function orchestrate(
     audit.push({
       label: 'Stage Agent',
       detail: stageResult.toolCalls.length > 0
-        ? `${stageResult.toolCalls.length} tool(s) executada(s)`
+        ? `${stageResult.toolCalls.length} tool(s) executada(s): ${stageResult.toolCalls.map((t) => `${t.name}${t.result.success ? ' ✓' : ' ✗'}`).join(', ')}`
         : 'Nenhuma tool chamada',
       data: {
         tools: stageResult.toolCalls.map((t) => t.name),
+        toolExecutions: stageResult.toolCalls.map((t) => ({
+          tool: t.name,
+          input: summarizeToolInput(t.name, t.input),
+          success: t.result.success,
+          reason: t.result.reason,
+          summary: summarizeToolResult(t.name, t.result),
+        })),
         inputTokens: stageResult.inputTokens,
         outputTokens: stageResult.outputTokens,
       },
@@ -498,6 +517,53 @@ export async function confirmAndExecute(
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function summarizeToolInput(tool: string, input: Record<string, unknown>): Record<string, unknown> {
+  switch (tool) {
+    case 'search_availability':
+      return { date: input.date }
+    case 'create_appointment':
+      return {
+        professional_id: String(input.professional_id ?? '').slice(0, 8) + '...',
+        service_id: String(input.service_id ?? '').slice(0, 8) + '...',
+        scheduled_at: input.scheduled_at,
+      }
+    case 'generate_pix':
+      return { amount: input.amount, description: input.description }
+    case 'move_stage':
+      return { stage_id: String(input.stage_id ?? '').slice(0, 8) + '...', reason: input.reason }
+    case 'notify_operator':
+      return { reason: input.reason, urgency: input.urgency }
+    default:
+      return input
+  }
+}
+
+function summarizeToolResult(
+  tool: string,
+  result: { success: boolean; reason?: string; data?: Record<string, unknown> },
+): string | null {
+  if (!result.success) return result.reason ?? 'Falhou'
+  const d = result.data
+  switch (tool) {
+    case 'search_availability': {
+      const profs = (d?.professionals as unknown[])?.length ?? 0
+      const profsArr = (d?.professionals as { slots?: unknown[] }[]) ?? []
+      const slots = profsArr.reduce((acc, p) => acc + (p.slots?.length ?? 0), 0)
+      return `${profs} profissional(is), ${slots} slot(s) em ${d?.date ?? '?'}`
+    }
+    case 'create_appointment':
+      return `Agendado para ${d?.scheduledAt ?? '?'}`
+    case 'generate_pix':
+      return `PIX R$ ${d?.amount ?? '?'}`
+    case 'move_stage':
+      return `Stage alterado`
+    case 'notify_operator':
+      return 'Operador notificado'
+    default:
+      return result.reason ?? null
+  }
+}
 
 function buildConfirmationSummary(
   toolCalls: Array<{ name: string; input: Record<string, unknown>; result: { data?: Record<string, unknown> } }>,

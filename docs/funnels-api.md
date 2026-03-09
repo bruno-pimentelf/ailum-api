@@ -7,11 +7,18 @@ Base: `/v1/funnels` | Auth: `Bearer <session_token>` em todas as rotas.
 ## Funnels
 
 ```
-GET    /v1/funnels          → lista funnels ativos com stages
-POST   /v1/funnels          → cria funil
-PATCH  /v1/funnels/:id      → edita funil
-DELETE /v1/funnels/:id      → desativa funil (soft delete)
+GET    /v1/funnels           → lista funnels ativos com stages
+POST   /v1/funnels           → cria funil
+POST   /v1/funnels/default   → cria funil padrão (stages + IA + triggers)
+PATCH  /v1/funnels/:id       → edita funil
+DELETE /v1/funnels/:id       → desativa funil (soft delete)
 ```
+
+### POST /v1/funnels/default
+
+Cria o **Funil Principal** com os stages padrão (Novo Lead, Qualificado, Consulta Agendada, Atendido), configurações da IA (allowedTools, personality) e trigger de boas-vindas. Usar quando o tenant ainda não tem fluxo configurado ou para ter o funil recomendado (com create_appointment, etc.).
+
+**Sem body.** Requer `FUNNELS_WRITE`. Resposta 201: funil criado com stages e agentConfig.
 
 **POST / PATCH body:**
 ```json

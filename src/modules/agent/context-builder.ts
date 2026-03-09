@@ -15,6 +15,8 @@ function buildTimeSlots(
   endTime: string,
   slotDurationMin: number,
   existingAppointments: { scheduledAt: Date; durationMin: number }[],
+  /** Em minutos desde meia-noite. Slots que começam antes são excluídos (já passaram). */
+  minStartMinutesFromMidnight?: number,
 ): AvailableSlot[] {
   const slots: AvailableSlot[] = []
   const [startH, startM] = startTime.split(':').map(Number)
@@ -32,6 +34,11 @@ function buildTimeSlots(
   }
 
   while (current + slotDurationMin <= end) {
+    if (minStartMinutesFromMidnight != null && current < minStartMinutesFromMidnight) {
+      current += slotDurationMin
+      continue
+    }
+
     const slotFree = !Array.from({ length: slotDurationMin }, (_, i) => current + i).some((m) =>
       bookedMinutes.has(m),
     )
@@ -71,17 +78,22 @@ export async function buildContext(
     nextAppointment,
     pendingCharge,
     professionalsRaw,
+    servicesRaw,
     memories,
     integrations,
   ] = await Promise.all([
-    // 1. Contact with stage + funnel
+    // 1. Contact with stage + funnel (including all funnel stages for move_stage)
     db.contact.findUniqueOrThrow({
       where: { id: contactId },
       include: {
         currentStage: {
           include: { agentConfig: true },
         },
-        currentFunnel: true,
+        currentFunnel: {
+          include: {
+            stages: { orderBy: { order: 'asc' }, select: { id: true, name: true, order: true } },
+          },
+        },
       },
     }),
 
@@ -97,13 +109,15 @@ export async function buildContext(
       },
     }),
 
-    // 3. Last 20 messages
-    db.message.findMany({
-      where: { contactId, tenantId },
-      orderBy: { createdAt: 'asc' },
-      take: 20,
-      select: { id: true, role: true, content: true, type: true, createdAt: true },
-    }),
+    // 3. Last 20 messages (most recent first, then reverse for chronological order)
+    db.message
+      .findMany({
+        where: { contactId, tenantId },
+        orderBy: { createdAt: 'desc' },
+        take: 20,
+        select: { id: true, role: true, content: true, type: true, createdAt: true },
+      })
+      .then((rows) => rows.reverse()),
 
     // 4. Next confirmed appointment
     db.appointment.findFirst({
@@ -152,7 +166,13 @@ export async function buildContext(
       },
     }),
 
-    // 7. Contact memories
+    // 7. Services available for scheduling (isConsultation = true)
+    db.service.findMany({
+      where: { tenantId, isActive: true, isConsultation: true },
+      select: { id: true, name: true, durationMin: true, price: true },
+    }),
+
+    // 8. Contact memories
     db.agentMemory.findMany({
       where: { contactId, tenantId },
       orderBy: { updatedAt: 'desc' },
@@ -160,7 +180,7 @@ export async function buildContext(
       select: { key: true, value: true, confidence: true },
     }),
 
-    // 8. Tenant integrations (asaas + zapi)
+    // 9. Tenant integrations (asaas + zapi)
     db.tenantIntegration.findMany({
       where: { tenantId, provider: { in: ['asaas', 'zapi'] }, isActive: true },
       select: { provider: true, instanceId: true, apiKeyEncrypted: true, isActive: true },
@@ -168,6 +188,10 @@ export async function buildContext(
   ])
 
   // Build available professionals with time slots
+  // Exclui slots que já passaram hoje (ex: às 19:19, 09:00 não é mais oferecido)
+  const nowMinutes = today.getHours() * 60 + today.getMinutes()
+  const minStartMinutes = nowMinutes + 15 // margem de 15 min — não oferece slot que começa em menos de 15 min
+
   const availableProfessionals: AvailableProfessional[] = []
   for (const prof of professionalsRaw) {
     // Skip if has an exception (holiday/day off)
@@ -182,6 +206,7 @@ export async function buildContext(
         avail.endTime,
         avail.slotDurationMin,
         prof.appointments,
+        minStartMinutes,
       )
       slots.push(...built)
     }
@@ -219,7 +244,25 @@ export async function buildContext(
   const stage = contact.currentStage
   const funnel = contact.currentFunnel
 
+  // Data e horário atuais para o agente construir scheduled_at e saber se há slots hoje
+  const now = new Date()
+  const day = String(now.getDate()).padStart(2, '0')
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const year = now.getFullYear()
+  const hours = String(now.getHours()).padStart(2, '0')
+  const mins = String(now.getMinutes()).padStart(2, '0')
+  const currentDate = `${day}/${month}/${year}`
+  const currentTime = `${hours}:${mins}`
+  const currentDateIsoExample = `${year}-${month}-${day}T09:00:00-03:00`
+
+  const tomorrow = new Date(now.getTime() + 86_400_000)
+  const tomorrowDateIso = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`
+
   return {
+    currentDate,
+    currentTime,
+    currentDateIsoExample,
+    tomorrowDateIso,
     contact: {
       id: contact.id,
       phone: contact.phone,
@@ -263,6 +306,9 @@ export async function buildContext(
     funnel: funnel
       ? { id: funnel.id, name: funnel.name, description: funnel.description }
       : null,
+    funnelStages: funnel?.stages
+      ? funnel.stages.map((s) => ({ id: s.id, name: s.name, order: s.order }))
+      : [],
     messages: messages.map((m) => ({
       id: m.id,
       role: m.role,
@@ -291,6 +337,12 @@ export async function buildContext(
         } as ContextCharge)
       : null,
     availableProfessionals,
+    availableServices: servicesRaw.map((s) => ({
+      id: s.id,
+      name: s.name,
+      durationMin: s.durationMin,
+      price: s.price,
+    })),
     memories,
     asaasIntegration,
     zapiIntegration,

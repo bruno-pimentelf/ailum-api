@@ -9,12 +9,15 @@
     "build": "tsc",
     "start": "tsx src/server.ts",
     "db:migrate": "prisma migrate dev",
-    "db:migrate:prod": "tsx node_modules/prisma/build/index.js migrate deploy",
+    "db:migrate:prod": "tsx --env-file=.env.production.local node_modules/prisma/build/index.js migrate deploy && pnpm db:generate",
+    "db:migrate:prod:resolve": "tsx --env-file=.env.production.local node_modules/prisma/build/index.js migrate resolve --rolled-back 20260309190000_add_search_availability_tool",
     "db:migrate:prod-local": "tsx --env-file=.env.production.local node_modules/prisma/build/index.js migrate deploy",
     "db:studio": "prisma studio",
     "db:studio:prod": "dotenv -e .env.production.local -- prisma studio",
     "db:generate": "prisma generate",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:generate:prod": "tsx --env-file=.env.production.local node_modules/prisma/build/index.js generate",
+    "db:seed": "tsx prisma/seed.ts",
+    "test:agent": "tsx --env-file=.env.production.local scripts/test-agent-setup.ts"
   },
   "keywords": [],
   "author": "",

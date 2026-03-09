@@ -26,6 +26,14 @@ declare module 'fastify' {
     authorize: (
       permission: Permission,
     ) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>
+
+    /**
+     * Hook for professional write: allows ADMIN (any) or PROFESSIONAL (own only).
+     * getProfessionalId(req) should return the professional id from params.
+     */
+    authorizeProfessionalWrite: (
+      getProfessionalId: (req: FastifyRequest) => string,
+    ) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>
   }
 
   interface FastifyRequest {

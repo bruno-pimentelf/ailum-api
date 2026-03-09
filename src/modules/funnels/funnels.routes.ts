@@ -8,7 +8,7 @@ import {
   BoardQuerySchema,
 } from './funnels.schema.js'
 import {
-  listFunnels, createFunnel, updateFunnel, deleteFunnel,
+  listFunnels, createFunnel, updateFunnel, deleteFunnel, createDefaultFunnel,
   listStages, createStage, updateStage, deleteStage,
   getStageAgentConfig, upsertStageAgentConfig,
   listTriggers, createTrigger, updateTrigger, deleteTrigger, toggleTrigger,
@@ -26,6 +26,10 @@ export async function funnelsRoutes(fastify: FastifyInstance) {
     onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.FUNNELS_WRITE)],
     schema: { body: CreateFunnelSchema },
   }, async (req, reply) => reply.status(201).send(await createFunnel(fastify.db, req.tenantId, req.body as never)))
+
+  fastify.post('/default', {
+    onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.FUNNELS_WRITE)],
+  }, async (req, reply) => reply.status(201).send(await createDefaultFunnel(fastify.db, req.tenantId)))
 
   fastify.patch('/:id', {
     onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.FUNNELS_WRITE)],
