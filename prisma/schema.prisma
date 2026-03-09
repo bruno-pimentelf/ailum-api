@@ -211,6 +211,22 @@ model Tenant {
   isActive         Boolean  @default(true)
   createdAt        DateTime @default(now()) @db.Timestamptz
 
+  // Perfil da clínica
+  logoUrl          String?
+  description      String?
+  phone            String?
+  email            String?
+  website          String?
+
+  // Endereço
+  addressStreet    String?
+  addressNumber    String?
+  addressComplement String?
+  addressNeighborhood String?
+  addressCity      String?
+  addressState     String?
+  addressZip       String?
+
   integrations         TenantIntegration[]
   tenantMembers        TenantMember[]
   professionals        Professional[]

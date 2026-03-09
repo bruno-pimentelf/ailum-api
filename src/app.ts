@@ -25,6 +25,7 @@ import { integrationsRoutes } from './modules/integrations/integrations.routes.j
 import { conversationsRoutes } from './modules/conversations/conversations.routes.js'
 import { authRoutes } from './modules/auth/auth.routes.js'
 import { agentRoutes } from './modules/agent/agent.routes.js'
+import { tenantRoutes } from './modules/tenant/tenant.routes.js'
 import { zapiWebhookRoutes } from './modules/webhooks/zapi.webhook.js'
 import { asaasWebhookRoutes } from './modules/webhooks/asaas.webhook.js'
 
@@ -105,6 +106,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await v1.register(integrationsRoutes, { prefix: '/integrations' })
       await v1.register(conversationsRoutes, { prefix: '/conversations' })
       await v1.register(authRoutes, { prefix: '/auth' })
+      await v1.register(tenantRoutes, { prefix: '/tenant' })
 
       // Agent — stricter rate limit (20/min per IP)
       await v1.register(
