@@ -1,7 +1,10 @@
 import { defineConfig } from "prisma/config";
 import { config } from "dotenv";
 
-config(); // carrega .env antes do Prisma resolver as variáveis
+// Só carrega o .env se DATABASE_URL ainda não estiver no ambiente
+if (!process.env["DATABASE_URL"]) {
+  config();
+}
 
 export default defineConfig({
   schema: "prisma/schema.prisma",
