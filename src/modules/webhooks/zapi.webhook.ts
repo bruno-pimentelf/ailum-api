@@ -395,24 +395,22 @@ async function findTenantByInstance(fastify: FastifyInstance, instanceId: string
 // ── 1. ReceivedCallback — mensagem recebida pelo WhatsApp ───────────────────
 
 async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPayload) {
-  if (payload.fromMe) return
+  // Grupos e newsletters nunca são processados
   if (payload.isGroup || payload.isNewsletter) return
   if (payload.waitingMessage) return
 
   const phone = payload.phone ?? payload.participantPhone
   const zapiMessageId = payload.messageId
+  const instanceId = payload.instanceId
 
-  if (!phone || !zapiMessageId) {
-    fastify.log.warn({ payload: { phone, messageId: zapiMessageId } }, 'zapi:received:missing_phone_or_messageId')
+  if (!phone || !zapiMessageId || !instanceId) {
+    fastify.log.warn({ phone, zapiMessageId, instanceId }, 'zapi:received:missing_fields')
     return
   }
 
-  const instanceId = payload.instanceId
-  if (!instanceId) return
-
   const extracted = extractContent(payload)
   if (!extracted) {
-    fastify.log.debug({ zapiMessageId, phone }, 'zapi:received:skipped_non_actionable')
+    fastify.log.debug({ zapiMessageId, phone, fromMe: payload.fromMe }, 'zapi:received:skipped_non_actionable')
     return
   }
 
@@ -433,6 +431,8 @@ async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPay
     return
   }
 
+  // Para fromMe, o "contato" é identificado pelo phone do chat (quem recebeu)
+  // Para mensagens do contato, o phone é quem enviou
   const contactName =
     payload.senderName && payload.senderName !== phone
       ? payload.senderName
@@ -441,7 +441,7 @@ async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPay
   const contact = await fastify.db.contact.upsert({
     where: { tenantId_phone: { tenantId, phone } },
     update: {
-      ...(contactName && { name: contactName }),
+      ...(contactName && !payload.fromMe && { name: contactName }),
       lastMessageAt: new Date(),
       updatedAt: new Date(),
     },
@@ -455,9 +455,10 @@ async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPay
   })
 
   const { content, type, metadata } = extracted
+  const role = payload.fromMe ? 'OPERATOR' : 'CONTACT'
 
   fastify.log.info(
-    { contactId: contact.id, tenantId, type, zapiMessageId },
+    { contactId: contact.id, tenantId, type, zapiMessageId, role },
     'zapi:received:processing',
   )
 
@@ -465,7 +466,7 @@ async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPay
     data: {
       tenantId,
       contactId: contact.id,
-      role: 'CONTACT',
+      role,
       type,
       content,
       metadata: metadata ? (metadata as object) : undefined,
@@ -480,7 +481,7 @@ async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPay
     contact.id,
     {
       id: savedMessage.id,
-      role: 'CONTACT',
+      role,
       type,
       content,
       createdAt: savedMessage.createdAt,
@@ -493,25 +494,28 @@ async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPay
     },
   )
 
-  const job = await agentQueue.add(
-    'process-message',
-    {
-      tenantId,
-      contactId: contact.id,
-      messageContent: content,
-      messageType: type,
-      messageMetadata: metadata,
-      zapiMessageId,
-      sessionId: payload.zapiConversationId,
-      referenceMessageId: payload.referenceMessageId ?? null,
-    },
-    { jobId: `agent:${contact.id}:${zapiMessageId}` },
-  )
+  // Apenas mensagens do contato disparam o agente
+  if (!payload.fromMe) {
+    const job = await agentQueue.add(
+      'process-message',
+      {
+        tenantId,
+        contactId: contact.id,
+        messageContent: content,
+        messageType: type,
+        messageMetadata: metadata,
+        zapiMessageId,
+        sessionId: payload.zapiConversationId,
+        referenceMessageId: payload.referenceMessageId ?? null,
+      },
+      { jobId: `agent:${contact.id}:${zapiMessageId}` },
+    )
 
-  fastify.log.info(
-    { jobId: job.id, contactId: contact.id, type },
-    'zapi:received:job_enqueued',
-  )
+    fastify.log.info(
+      { jobId: job.id, contactId: contact.id, type },
+      'zapi:received:job_enqueued',
+    )
+  }
 }
 
 // ── 2. DeliveryCallback — confirmação de que a mensagem foi enviada ─────────
