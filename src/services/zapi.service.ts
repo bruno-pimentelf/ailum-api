@@ -12,7 +12,8 @@ export interface ZapiConfig {
 }
 
 export interface ZapiSendResult {
-  zapiId: string
+  zapiId?: string
+  messageId?: string
 }
 
 export class ZapiApiError extends Error {
@@ -123,6 +124,78 @@ export async function sendDocument(
     phone,
     document: docUrl,
     fileName: filename,
+  })
+}
+
+export async function sendVideo(
+  instanceId: string,
+  instanceToken: string,
+  phone: string,
+  videoUrl: string,
+  caption?: string,
+): Promise<ZapiSendResult> {
+  return zapiFetch<ZapiSendResult>(instanceId, instanceToken, '/send-video', {
+    phone,
+    video: videoUrl,
+    caption,
+  })
+}
+
+export async function sendSticker(
+  instanceId: string,
+  instanceToken: string,
+  phone: string,
+  stickerUrl: string,
+): Promise<ZapiSendResult> {
+  return zapiFetch<ZapiSendResult>(instanceId, instanceToken, '/send-sticker', {
+    phone,
+    sticker: stickerUrl,
+  })
+}
+
+export async function sendLocation(
+  instanceId: string,
+  instanceToken: string,
+  phone: string,
+  latitude: string,
+  longitude: string,
+  title: string,
+  address: string,
+): Promise<ZapiSendResult> {
+  return zapiFetch<ZapiSendResult>(instanceId, instanceToken, '/send-location', {
+    phone,
+    latitude,
+    longitude,
+    title,
+    address,
+  })
+}
+
+export async function sendContact(
+  instanceId: string,
+  instanceToken: string,
+  phone: string,
+  contactName: string,
+  contactPhone: string,
+): Promise<ZapiSendResult> {
+  return zapiFetch<ZapiSendResult>(instanceId, instanceToken, '/send-contact', {
+    phone,
+    contactName,
+    contactPhone,
+  })
+}
+
+export async function sendReaction(
+  instanceId: string,
+  instanceToken: string,
+  phone: string,
+  messageId: string,
+  reaction: string,
+): Promise<ZapiSendResult> {
+  return zapiFetch<ZapiSendResult>(instanceId, instanceToken, '/send-reaction', {
+    phone,
+    messageId,
+    reaction,
   })
 }
 

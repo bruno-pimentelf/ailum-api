@@ -1,5 +1,4 @@
 import type { FastifyInstance } from 'fastify'
-import { env } from '../../config/env.js'
 import { agentQueue } from '../../jobs/queues.js'
 import { FirebaseSyncService } from '../../services/firebase-sync.service.js'
 
@@ -636,15 +635,6 @@ async function handlePresence(fastify: FastifyInstance, payload: ZapiPresencePay
 export async function zapiWebhookRoutes(fastify: FastifyInstance) {
   fastify.post('/zapi', async (request, reply) => {
     reply.status(200).send({ ok: true })
-
-    const token = request.headers['client-token'] as string | undefined
-    if (token !== env.ZAPI_WEBHOOK_TOKEN) {
-      fastify.log.warn(
-        { ip: request.ip, receivedToken: token?.slice(0, 6) + '***', expectedPrefix: env.ZAPI_WEBHOOK_TOKEN?.slice(0, 6) + '***' },
-        'zapi:webhook:invalid_token',
-      )
-      return
-    }
 
     const payload = request.body as ZapiPayload
 

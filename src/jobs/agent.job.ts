@@ -20,38 +20,14 @@ export function createAgentWorker(fastify: FastifyInstance) {
 
       job.log(`[agent-job] contact=${contactId} tenant=${tenantId}`)
 
+      // Verifica se o agente está configurado (ANTHROPIC_API_KEY)
+      if (!env.ANTHROPIC_API_KEY) {
+        fastify.log.warn({ contactId, tenantId }, 'agent-job:skipped — ANTHROPIC_API_KEY not set')
+        return { status: 'skipped', reason: 'agent_not_configured' }
+      }
+
       try {
-        // First, save the incoming contact message to DB
-        const savedMessage = await fastify.db.message.create({
-          data: {
-            tenantId,
-            contactId,
-            role: 'CONTACT',
-            type: (job.data.messageType as 'TEXT' | 'IMAGE' | 'AUDIO' | 'DOCUMENT') ?? 'TEXT',
-            content: messageContent,
-            zapiMessageId: job.data.zapiMessageId,
-            sessionId: job.data.sessionId,
-          },
-        })
-
-        if (fastify.firebase.firestore) {
-          await fastify.firebase.firestore
-            .collection('tenants')
-            .doc(tenantId)
-            .collection('contacts')
-            .doc(contactId)
-            .collection('messages')
-            .doc(savedMessage.id)
-            .set({
-              id: savedMessage.id,
-              role: 'CONTACT',
-              type: savedMessage.type,
-              content: savedMessage.content,
-              createdAt: savedMessage.createdAt,
-            })
-        }
-
-        // Run the full orchestration pipeline
+        // A mensagem já foi salva pelo webhook antes de enfileirar — não salvar novamente
         const result = await orchestrate(messageContent, contactId, tenantId, fastify)
 
         job.log(`[agent-job] status=${result.status} duration=${result.durationMs}ms`)
@@ -60,7 +36,6 @@ export function createAgentWorker(fastify: FastifyInstance) {
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err)
 
-        // Log error to agent_job_logs
         try {
           await fastify.db.agentJobLog.create({
             data: {
@@ -74,6 +49,7 @@ export function createAgentWorker(fastify: FastifyInstance) {
           fastify.log.error({ logErr }, 'agent-job:failed to write error log')
         }
 
+        // Garante que o indicador de digitação seja limpo em caso de erro
         try {
           if (fastify.firebase.firestore) {
             await fastify.firebase.firestore
