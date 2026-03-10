@@ -16,7 +16,12 @@ export async function membersRoutes(fastify: FastifyInstance) {
     onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.MEMBERS_WRITE)],
     schema: { body: InviteMemberSchema },
   }, async (req, reply) => {
-    const result = await inviteMember(fastify.db, fastify, req.tenantId, req.body as never, req.headers)
+    const headers: HeadersInit = Object.fromEntries(
+      Object.entries(req.headers)
+        .filter(([, v]) => v != null)
+        .map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : String(v)]),
+    )
+    const result = await inviteMember(fastify.db, fastify, req.tenantId, req.body as never, headers)
     req.log.info({ invitationId: result.id }, 'member:invited')
     return reply.status(201).send(result)
   })

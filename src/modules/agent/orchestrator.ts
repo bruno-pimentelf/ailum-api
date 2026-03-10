@@ -109,7 +109,7 @@ export async function orchestrate(
         totalOutputTokens: extras?.totalOutputTokens ?? 0,
         durationMs: Date.now() - startedAt,
         error: extras?.error ?? null,
-        auditDetails: audit,
+        auditDetails: JSON.parse(JSON.stringify(audit)),
       },
     })
   }
@@ -456,7 +456,7 @@ export async function orchestrate(
         status: 'ERROR',
         error: err instanceof Error ? err.message : String(err),
         durationMs: Date.now() - startedAt,
-        auditDetails: audit,
+        auditDetails: JSON.parse(JSON.stringify(audit)),
       },
     })
 

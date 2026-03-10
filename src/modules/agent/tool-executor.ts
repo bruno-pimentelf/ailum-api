@@ -142,7 +142,7 @@ async function executeSearchAvailability(
   return {
     success: true,
     requiresConfirmation: false,
-    data: result,
+    data: result as unknown as Record<string, unknown>,
   }
 }
 
