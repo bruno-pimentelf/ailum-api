@@ -171,9 +171,14 @@ export async function runStageAgent(
           : '',
         `INTENÇÃO DETECTADA: ${routing.intent} (confiança: ${routing.confidence})`,
         context.contact.name ? `NOME DO CONTATO: ${context.contact.name}` : '',
-        context.nextAppointment
-          ? `PRÓXIMA CONSULTA: ${context.nextAppointment.scheduledAt.toLocaleString('pt-BR')} com ${context.nextAppointment.professional.fullName}`
-          : '',
+        context.upcomingAppointments.length > 0
+          ? `CONSULTAS AGENDADAS DO CONTATO (${context.upcomingAppointments.length}) — use APENAS estes dados exatos:\n${context.upcomingAppointments
+              .map(
+                (a) =>
+                  `- ${a.scheduledAt.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} com ${a.professional.fullName} (${a.service.name})`,
+              )
+              .join('\n')}\nREGRAS: Ao mencionar consultas (cumprimento, confirmação ou pergunta), use EXATAMENTE os horários acima (horário de Brasília). Se houver mais de uma, diga "consultas" no plural e mencione a quantidade ou liste. NUNCA invente horários.`
+          : 'O contato não tem consultas agendadas.',
         context.pendingCharge
           ? `COBRANÇA PENDENTE: R$ ${context.pendingCharge.amount} — ${context.pendingCharge.description}`
           : '',

@@ -27,8 +27,10 @@ function buildReminderMessage(
   },
 ): string {
   const name = contact.name ?? 'paciente'
-  const dateStr = appointment.scheduledAt.toLocaleDateString('pt-BR')
+  const tz = 'America/Sao_Paulo'
+  const dateStr = appointment.scheduledAt.toLocaleDateString('pt-BR', { timeZone: tz })
   const timeStr = appointment.scheduledAt.toLocaleTimeString('pt-BR', {
+    timeZone: tz,
     hour: '2-digit',
     minute: '2-digit',
   })

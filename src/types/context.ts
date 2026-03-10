@@ -168,7 +168,10 @@ export interface AgentContext {
   funnel: ContextFunnel | null
   funnelStages: ContextFunnelStage[]
   messages: ContextMessage[]
+  /** Próxima consulta (a mais próxima no tempo) — mantido para compatibilidade */
   nextAppointment: ContextAppointment | null
+  /** Próximas consultas (PENDING ou CONFIRMED) — para o agente listar quando o paciente perguntar */
+  upcomingAppointments: ContextAppointment[]
   pendingCharge: ContextCharge | null
   availableProfessionals: AvailableProfessional[]
   availableServices: ContextService[]

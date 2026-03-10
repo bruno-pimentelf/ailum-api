@@ -83,7 +83,7 @@ export async function buildContext(
     contact,
     tenant,
     messages,
-    nextAppointment,
+    upcomingAppointmentsRaw,
     pendingCharge,
     professionalsRaw,
     servicesRaw,
@@ -127,15 +127,16 @@ export async function buildContext(
       })
       .then((rows) => rows.reverse()),
 
-    // 4. Next confirmed appointment
-    db.appointment.findFirst({
+    // 4. Próximas consultas (PENDING ou CONFIRMED) — para listar todas quando o paciente perguntar
+    db.appointment.findMany({
       where: {
         contactId,
         tenantId,
-        status: 'CONFIRMED',
+        status: { in: ['PENDING', 'CONFIRMED'] },
         scheduledAt: { gt: today },
       },
       orderBy: { scheduledAt: 'asc' },
+      take: 10,
       include: {
         professional: { select: { fullName: true, specialty: true } },
         service: { select: { name: true, price: true } },
@@ -364,16 +365,25 @@ export async function buildContext(
       type: m.type,
       createdAt: m.createdAt,
     })),
-    nextAppointment: nextAppointment
-      ? ({
-          id: nextAppointment.id,
-          scheduledAt: nextAppointment.scheduledAt,
-          durationMin: nextAppointment.durationMin,
-          status: nextAppointment.status,
-          professional: nextAppointment.professional,
-          service: nextAppointment.service,
-        } as ContextAppointment)
-      : null,
+    nextAppointment:
+      upcomingAppointmentsRaw.length > 0
+        ? ({
+            id: upcomingAppointmentsRaw[0]!.id,
+            scheduledAt: upcomingAppointmentsRaw[0]!.scheduledAt,
+            durationMin: upcomingAppointmentsRaw[0]!.durationMin,
+            status: upcomingAppointmentsRaw[0]!.status,
+            professional: upcomingAppointmentsRaw[0]!.professional,
+            service: upcomingAppointmentsRaw[0]!.service,
+          } as ContextAppointment)
+        : null,
+    upcomingAppointments: upcomingAppointmentsRaw.map((a) => ({
+      id: a.id,
+      scheduledAt: a.scheduledAt,
+      durationMin: a.durationMin,
+      status: a.status,
+      professional: a.professional,
+      service: a.service,
+    })) as ContextAppointment[],
     pendingCharge: pendingCharge
       ? ({
           id: pendingCharge.id,

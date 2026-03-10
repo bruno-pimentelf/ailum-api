@@ -126,10 +126,11 @@ async function executeSendMessage(
   const template = actionConfig.message ?? ''
   if (!template) return
 
+  const ptBrOpts = { timeZone: 'America/Sao_Paulo' as const }
   const interpolated = interpolateTemplate(template, {
     name: contact.name ?? 'paciente',
     appointmentTime: nextAppointment
-      ? nextAppointment.scheduledAt.toLocaleString('pt-BR')
+      ? nextAppointment.scheduledAt.toLocaleString('pt-BR', ptBrOpts)
       : null,
   })
 
@@ -138,7 +139,7 @@ async function executeSendMessage(
     finalMessage = await personalizeWithAI(
       interpolated,
       contact.name,
-      nextAppointment?.scheduledAt.toLocaleString('pt-BR') ?? null,
+      nextAppointment?.scheduledAt.toLocaleString('pt-BR', ptBrOpts) ?? null,
     )
   }
 
@@ -304,7 +305,7 @@ export function createTriggerWorker(fastify: FastifyInstance) {
             where: {
               contactId: contact.id,
               tenantId: contact.tenantId,
-              status: 'CONFIRMED',
+              status: { in: ['PENDING', 'CONFIRMED'] },
               scheduledAt: { gt: new Date() },
             },
             orderBy: { scheduledAt: 'asc' },
@@ -407,12 +408,12 @@ export function createTriggerWorker(fastify: FastifyInstance) {
               where: { stageId: contact.currentStageId, tenantId: tenant.id, isActive: true },
             })
 
-            // Get next confirmed appointment
+            // Get next appointment (PENDING ou CONFIRMED)
             const nextAppointment = await fastify.db.appointment.findFirst({
               where: {
                 contactId: contact.id,
                 tenantId: tenant.id,
-                status: 'CONFIRMED',
+                status: { in: ['PENDING', 'CONFIRMED'] },
                 scheduledAt: { gt: new Date() },
               },
               orderBy: { scheduledAt: 'asc' },
