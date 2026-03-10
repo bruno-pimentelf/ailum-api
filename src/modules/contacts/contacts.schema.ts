@@ -32,4 +32,5 @@ export const UpdateContactSchema = Type.Object({
 
 export const MoveStageSchema = Type.Object({
   stageId: Type.String({ format: 'uuid' }),
+  funnelId: Type.Optional(Type.String({ format: 'uuid' })),
 })

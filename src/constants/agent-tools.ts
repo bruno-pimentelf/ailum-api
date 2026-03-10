@@ -46,21 +46,21 @@ scheduled_at: combine data + slot (ex: slot "09:00" e data 2026-03-10 → "2026-
   generate_pix: {
     name: 'generate_pix',
     description:
-      'Generate a PIX charge for the contact via Asaas. Use after appointment is scheduled and payment is required.',
+      'Gera cobrança PIX para o contato via Asaas. Use após o agendamento ser confirmado e quando o pagamento for necessário.',
     input_schema: Type.Object({
       amount: Type.Number({
         minimum: 1,
-        description: 'Charge amount in BRL (e.g. 150.00)',
+        description: 'Valor da cobrança em BRL (ex: 150.00)',
       }),
-      description: Type.String({ description: 'Charge description shown to the patient' }),
+      description: Type.String({ description: 'Descrição da cobrança exibida ao paciente' }),
       appointment_id: Type.Optional(
-        Type.String({ format: 'uuid', description: 'UUID of the related appointment' }),
+        Type.String({ format: 'uuid', description: 'UUID da consulta relacionada' }),
       ),
       due_hours: Type.Optional(
         Type.Number({
           minimum: 1,
           default: 24,
-          description: 'Hours until the PIX expires',
+          description: 'Horas até o PIX expirar',
         }),
       ),
     }),
@@ -69,24 +69,24 @@ scheduled_at: combine data + slot (ex: slot "09:00" e data 2026-03-10 → "2026-
   move_stage: {
     name: 'move_stage',
     description:
-      'Move the contact to a different stage within the current funnel. Use when the conversation outcome warrants a stage change.',
+      'Move o contato para outro estágio do funil. Use quando o resultado da conversa justificar mudança de estágio.',
     input_schema: Type.Object({
-      stage_id: Type.String({ format: 'uuid', description: 'UUID of the target stage' }),
-      reason: Type.Optional(Type.String({ description: 'Reason for moving to this stage' })),
+      stage_id: Type.String({ format: 'uuid', description: 'UUID do estágio de destino' }),
+      reason: Type.Optional(Type.String({ description: 'Motivo da mudança de estágio' })),
     }),
   },
 
   notify_operator: {
     name: 'notify_operator',
     description:
-      'Hand off the conversation to a human operator. Use when: the contact is upset, asks for a human, or the issue is outside the agent scope.',
+      'Transfere a conversa para um operador humano. Use quando: o contato está irritado, pede um humano, ou o assunto está fora do escopo do agente.',
     input_schema: Type.Object({
       reason: Type.String({
-        description: 'Brief explanation of why human intervention is needed',
+        description: 'Breve explicação do motivo da intervenção humana',
       }),
       urgency: Type.Union([Type.Literal('low'), Type.Literal('medium'), Type.Literal('high')], {
         default: 'medium',
-        description: 'Urgency level for the operator',
+        description: 'Nível de urgência para o operador',
       }),
     }),
   },
@@ -94,12 +94,12 @@ scheduled_at: combine data + slot (ex: slot "09:00" e data 2026-03-10 → "2026-
   send_message: {
     name: 'send_message',
     description:
-      'Send a WhatsApp message to the contact. Use to send information, confirmations, or follow-up messages.',
+      'Envia mensagem WhatsApp para o contato. Use para enviar informações, confirmações ou mensagens de acompanhamento.',
     input_schema: Type.Object({
       content: Type.String({
         minLength: 1,
         maxLength: 4096,
-        description: 'Message text to send via WhatsApp',
+        description: 'Texto da mensagem a enviar via WhatsApp',
       }),
       type: Type.Optional(
         Type.Union(
@@ -113,7 +113,7 @@ scheduled_at: combine data + slot (ex: slot "09:00" e data 2026-03-10 → "2026-
         ),
       ),
       media_url: Type.Optional(
-        Type.String({ format: 'uri', description: 'URL of the media to send (for non-text types)' }),
+        Type.String({ format: 'uri', description: 'URL da mídia a enviar (para tipos não-texto)' }),
       ),
     }),
   },

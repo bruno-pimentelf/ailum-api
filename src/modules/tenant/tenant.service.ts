@@ -6,6 +6,8 @@ const TENANT_SELECT = {
   slug: true,
   plan: true,
   isAgentEnabledForWhatsApp: true,
+  agentBasePrompt: true,
+  guardrailRules: true,
   logoUrl: true,
   description: true,
   phone: true,
@@ -34,6 +36,8 @@ export async function updateTenant(
   body: {
     name?: string
     isAgentEnabledForWhatsApp?: boolean
+    agentBasePrompt?: string | null
+    guardrailRules?: string | null
     description?: string
     phone?: string
     email?: string

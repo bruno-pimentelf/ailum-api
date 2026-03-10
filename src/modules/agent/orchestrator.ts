@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { triggerQueue } from '../../jobs/queues.js'
 import { buildContext } from './context-builder.js'
 import { routeMessage } from './router.agent.js'
 import { runStageAgent } from './stage.agent.js'
@@ -37,6 +38,11 @@ export interface OrchestratorResult {
 
 // Redis key for pending confirmation state
 const pendingConfirmationKey = (contactId: string) => `pending_confirmation:${contactId}`
+
+function stripTrailingPeriod(s: string): string {
+  if (!s?.trim()) return s ?? ''
+  return s.replace(/\.\s*$/, '').trimEnd()
+}
 const CONFIRMATION_TTL_SECONDS = 600
 
 type AuditEntry = { label: string; detail: string; data?: Record<string, unknown> }
@@ -214,6 +220,23 @@ export async function orchestrate(
 
     // 7. Confirmation required — save state in Redis
     if (stageResult.requiresConfirmation) {
+      const createAppointmentSuccess = stageResult.toolCalls.find(
+        (t) => t.name === 'create_appointment' && t.result.success && t.result.data,
+      )
+      const replyToSend =
+        stageResult.reply?.trim() ||
+        (createAppointmentSuccess?.result.data
+          ? (() => {
+              const d = createAppointmentSuccess.result.data as {
+                scheduledAtFormatted?: string
+                professionalName?: string | null
+                serviceName?: string | null
+              }
+              return d.scheduledAtFormatted
+                ? `Consulta agendada para ${d.scheduledAtFormatted} com ${d.professionalName ?? 'o profissional'}${d.serviceName ? ` — ${d.serviceName}` : ''} — até lá`
+                : 'Consulta agendada com sucesso. Qualquer dúvida, estamos à disposição'
+            })()
+          : null)
       const state: PendingConfirmationState = {
         contactId,
         tenantId,
@@ -249,6 +272,47 @@ export async function orchestrate(
       })
       audit.push({ label: 'Resultado', detail: 'Aguardando confirmação do usuário' })
 
+      const finalText = replyToSend ? stripTrailingPeriod(replyToSend) : (stageResult.reply ? stripTrailingPeriod(stageResult.reply) : null)
+      if (finalText) {
+        const chunks = splitIntoChunks(finalText)
+        const zapi = !testMode && context.zapiIntegration?.isActive && context.zapiIntegration.instanceId
+          ? new ZapiService()
+          : null
+        for (let i = 0; i < chunks.length; i++) {
+          const chunk = chunks[i]!
+          const savedMessage = await fastify.db.message.create({
+            data: {
+              tenantId,
+              contactId,
+              role: 'AGENT',
+              type: 'TEXT',
+              content: chunk,
+              metadata: { confirmationPending: true, chunkIndex: i, totalChunks: chunks.length },
+            },
+          })
+          await sync.syncMessage({
+            tenantId,
+            contactId,
+            messageId: savedMessage.id,
+            role: 'AGENT',
+            type: 'TEXT',
+            content: chunk,
+            createdAt: savedMessage.createdAt,
+          })
+          if (zapi && context.zapiIntegration) {
+            await zapi.sendText({
+              instanceId: context.zapiIntegration.instanceId!,
+              apiKey: context.zapiIntegration.apiKey,
+              phone: context.contact.phone,
+              message: chunk,
+            })
+          }
+          if (i < chunks.length - 1) {
+            await sleep(computeDelayBetweenChunks(chunk.trim().split(/\s+/).filter(Boolean).length))
+          }
+        }
+      }
+
       await setAgentTyping(false, contactId, tenantId, fastify)
       await writeAudit('CONFIRMATION_REQUIRED', null, {
         routerIntent: routing.intent,
@@ -259,7 +323,7 @@ export async function orchestrate(
       })
       return {
         status: 'CONFIRMATION_REQUIRED',
-        reply: stageResult.reply,
+        reply: finalText ?? null,
         confirmationSummary: buildConfirmationSummary(stageResult.toolCalls),
         intent: routing.intent,
         confidence: routing.confidence,
@@ -316,6 +380,13 @@ export async function orchestrate(
       })
     }
 
+    const stageMoved = stageResult.toolCalls.some(
+      (t) => (t.name === 'create_appointment' || t.name === 'move_stage') && t.result.success,
+    )
+    if (stageMoved) {
+      triggerQueue.add('trigger-contact', { tenantId, contactId }, { delay: 1500 }).catch(() => {})
+    }
+
     // 8. Apply guardrails
     const guardrail = await applyGuardrails(
       stageResult.reply,
@@ -324,7 +395,19 @@ export async function orchestrate(
       fastify,
     )
 
-    const finalReply = guardrail.safeReply ?? stageResult.reply
+    let finalReply = guardrail.safeReply ?? stageResult.reply
+
+    // Fallback: agente executou create_appointment com sucesso mas não gerou texto
+    if (!finalReply?.trim() && createAppointmentSuccess?.result.data) {
+      const d = createAppointmentSuccess.result.data as {
+        scheduledAtFormatted?: string
+        professionalName?: string | null
+        serviceName?: string | null
+      }
+      finalReply = d.scheduledAtFormatted
+        ? `Consulta agendada para ${d.scheduledAtFormatted} com ${d.professionalName ?? 'o profissional'}${d.serviceName ? ` — ${d.serviceName}` : ''} — até lá`
+        : 'Consulta agendada com sucesso. Qualquer dúvida, estamos à disposição'
+    }
 
     audit.push({
       label: 'Guardrails',
@@ -338,7 +421,7 @@ export async function orchestrate(
     audit.push({ label: 'Resultado', detail: deliveryNote })
 
     // 9. Humanização: dividir resposta em partes e enviar com delay (simula digitação humana)
-    const chunks = splitIntoChunks(finalReply)
+    const chunks = splitIntoChunks(stripTrailingPeriod(finalReply))
     const initialDelayMs = computeDelayBeforeReply(
       message.trim().split(/\s+/).filter(Boolean).length,
     )
@@ -505,6 +588,13 @@ export async function confirmAndExecute(
       await executeToolSafely(tc.name, tc.input, context, fastify, {
         testMode: confirmTestMode,
       })
+    }
+
+    const stageMoved = state.toolCalls.some(
+      (t) => t.name === 'create_appointment' || t.name === 'move_stage',
+    )
+    if (stageMoved) {
+      triggerQueue.add('trigger-contact', { tenantId, contactId }, { delay: 1500 }).catch(() => {})
     }
 
     const confirmationReply = state.agentReply

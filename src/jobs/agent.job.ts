@@ -1,6 +1,8 @@
 import { Worker } from 'bullmq'
 import type { FastifyInstance } from 'fastify'
 import { env } from '../config/env.js'
+import { getEntryFunnelFirstStage } from '../modules/funnels/funnels.service.js'
+import { FirebaseSyncService } from '../services/firebase-sync.service.js'
 import { orchestrate } from '../modules/agent/orchestrator.js'
 
 export interface AgentJobData {
@@ -28,6 +30,39 @@ export function createAgentWorker(fastify: FastifyInstance) {
       }
 
       try {
+        // Se o contato não tem stage, atribui ao primeiro stage do funil de entrada (isDefault ou primeiro por order)
+        const contact = await fastify.db.contact.findUnique({
+          where: { id: contactId, tenantId },
+          select: { currentStageId: true },
+        })
+        if (contact && !contact.currentStageId) {
+          const entry = await getEntryFunnelFirstStage(fastify.db, tenantId)
+          if (entry) {
+            const updated = await fastify.db.contact.update({
+              where: { id: contactId, tenantId },
+              data: {
+                currentStageId: entry.stageId,
+                currentFunnelId: entry.funnelId,
+                stageEnteredAt: new Date(),
+                updatedAt: new Date(),
+              },
+            })
+            const sync = new FirebaseSyncService(fastify.firebase.firestore, fastify.log)
+            await sync.syncContact(tenantId, {
+              id: updated.id,
+              phone: updated.phone,
+              name: updated.name,
+              email: updated.email,
+              status: updated.status,
+              currentStageId: updated.currentStageId,
+              currentFunnelId: updated.currentFunnelId,
+              lastMessageAt: updated.lastMessageAt,
+              assignedProfessionalId: updated.assignedProfessionalId,
+            })
+            job.log(`[agent-job] contact assigned to entry stage ${entry.stageId}`)
+          }
+        }
+
         // A mensagem já foi salva pelo webhook antes de enfileirar — não salvar novamente
         const result = await orchestrate(messageContent, contactId, tenantId, fastify, {
           testMode: testMode ?? false,

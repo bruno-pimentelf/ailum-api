@@ -20,10 +20,11 @@ Cria o **Funil Principal** com os stages padrão (Novo Lead, Qualificado, Consul
 
 **Sem body.** Requer `FUNNELS_WRITE`. Resposta 201: funil criado com stages e agentConfig.
 
-**POST / PATCH body:**
+**PATCH /v1/funnels/:id body:**
 ```json
-{ "name": "Consulta Particular", "description": "...", "order": 0 }
+{ "name?", "description?", "order?", "isDefault?" }
 ```
+`isDefault: true` — marca este funil como funil de entrada. Apenas um funil por tenant pode ser padrão. Novos contatos sem stage são atribuídos ao primeiro stage deste funil.
 
 ---
 

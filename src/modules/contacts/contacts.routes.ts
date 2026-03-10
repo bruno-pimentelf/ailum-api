@@ -78,8 +78,8 @@ export async function contactsRoutes(fastify: FastifyInstance) {
     },
     async (req) => {
       const { id } = req.params as { id: string }
-      const { stageId } = req.body as { stageId: string }
-      return moveContactStage(fastify.db, fastify, req.tenantId, id, stageId)
+      const { stageId, funnelId } = req.body as { stageId: string; funnelId?: string }
+      return moveContactStage(fastify.db, fastify, req.tenantId, id, stageId, funnelId)
     },
   )
 

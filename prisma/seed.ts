@@ -52,9 +52,9 @@ async function main() {
       slug: 'clinica-exemplo',
       plan: 'starter',
       agentBasePrompt:
-        'Você é a assistente virtual da Clínica Exemplo. Seja sempre gentil, profissional e empática. ' +
+        'Você é da recepção da Clínica Exemplo. Seja gentil, profissional e empática. ' +
         'Fale em português brasileiro. Nunca dê diagnósticos médicos. ' +
-        'Seu objetivo é ajudar pacientes a agendarem consultas e responder dúvidas gerais.',
+        'Seu objetivo é ajudar pacientes a agendarem consultas e responder dúvidas gerais. Apresente-se como pessoa, nunca como assistente virtual ou bot.',
       guardrailRules:
         'Nunca forneça diagnósticos médicos. Nunca prometa resultados terapêuticos. ' +
         'Nunca mencione concorrentes. Sempre encaminhe emergências para o SAMU (192).',
@@ -196,6 +196,7 @@ async function main() {
       name: 'Funil Principal',
       description: 'Funil padrão de atendimento para novos pacientes.',
       isActive: true,
+      isDefault: true,
       order: 0,
     },
   })
@@ -208,9 +209,9 @@ async function main() {
       color: '#64748b',
       order: 0,
       isTerminal: false,
-      agentName: 'Ailum',
+      agentName: 'Recepção',
       agentPersonality:
-        'Você é Ailum, assistente virtual da clínica. Seja calorosa e acolhedora. ' +
+        'Você é da recepção da clínica. Seja calorosa e acolhedora, como secretária falando com paciente. ' +
         'Qualifique o lead e facilite o agendamento. Quando tiver profissional, serviço e horário acordados, use create_appointment.',
       stageContext:
         'Contato inicial. Apresente a clínica, profissionais e serviços. Quando o contato escolher horário e confirmar, chame create_appointment. Use os IDs do contexto (profissionais e serviços).',
@@ -221,7 +222,7 @@ async function main() {
       color: '#3b82f6',
       order: 1,
       isTerminal: false,
-      agentName: 'Ailum',
+      agentName: 'Recepção',
       agentPersonality:
         'Você está conversando com alguém interessado em consulta. ' +
         'Seja entusiasmada e facilite o agendamento. Mostre disponibilidade e valor. Quando confirmar, chame create_appointment.',
@@ -234,7 +235,7 @@ async function main() {
       color: '#10b981',
       order: 2,
       isTerminal: false,
-      agentName: 'Ailum',
+      agentName: 'Recepção',
       agentPersonality:
         'O paciente tem uma consulta agendada. Seja confirmadora e apoiadora. ' +
         'Envie lembretes amigáveis e responda dúvidas sobre a consulta. Pagamento será tratado na clínica.',
@@ -247,7 +248,7 @@ async function main() {
       color: '#8b5cf6',
       order: 3,
       isTerminal: true,
-      agentName: 'Ailum',
+      agentName: 'Recepção',
       agentPersonality:
         'O paciente foi atendido. Seja grata e encoraje o retorno. ' +
         'Pergunte sobre a experiência e ofereça agendar retorno.',
@@ -306,8 +307,7 @@ async function main() {
       actionConfig: {
         useAI: false,
         message:
-          'Olá! Sou a Ailum, assistente virtual da Clínica Exemplo 👋\n' +
-          'Fico feliz em receber você! Como posso te ajudar hoje?',
+          'Olá, tudo bem? Que bom falar com você. Como posso ajudar hoje?',
       },
     },
     {
@@ -333,8 +333,7 @@ async function main() {
       actionConfig: {
         useAI: false,
         message:
-          'Oi! Notei que você entrou em contato conosco 🙂\n' +
-          'Posso te ajudar com alguma informação sobre a clínica ou agendamento?',
+          'Oi, notei que você entrou em contato conosco. Posso te ajudar com alguma informação sobre a clínica ou agendamento?',
       },
     },
     {
@@ -346,7 +345,7 @@ async function main() {
       actionConfig: {
         useAI: false,
         message:
-          '✅ Pagamento confirmado! Sua consulta está garantida.\n' +
+          'Pagamento confirmado. Sua consulta está garantida.\n' +
           'Aguardamos você na data e horário combinados. Qualquer dúvida, estou aqui!',
       },
     },

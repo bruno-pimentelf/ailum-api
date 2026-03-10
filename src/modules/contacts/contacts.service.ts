@@ -167,14 +167,17 @@ export async function moveContactStage(
   tenantId: string,
   contactId: string,
   stageId: string,
+  funnelId?: string,
 ) {
-  // Validate stage belongs to the same tenant
   const stage = await db.stage.findFirst({
     where: { id: stageId, tenantId },
     include: { funnel: { select: { id: true } } },
   })
   if (!stage) {
     throw fastify.httpErrors.notFound('Stage not found')
+  }
+  if (funnelId != null && stage.funnelId !== funnelId) {
+    throw fastify.httpErrors.badRequest('Stage does not belong to the specified funnel')
   }
 
   const contact = await db.contact.update({

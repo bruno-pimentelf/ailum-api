@@ -205,14 +205,24 @@ export async function getProfessionalAvailability(
   const dayOfWeek = targetDate.getDay()
   const nextDay = new Date(targetDate.getTime() + 86_400_000)
 
-  const [professional, availability, exceptions, service, existingAppointments] =
+  const [professional, availability, overrides, exceptions, blockRanges, service, existingAppointments] =
     await Promise.all([
       db.professional.findFirst({ where: { id: professionalId, tenantId } }),
       db.professionalAvailability.findMany({
         where: { professionalId, dayOfWeek },
       }),
+      db.availabilityOverride.findMany({
+        where: { professionalId, date: targetDate },
+      }),
       db.availabilityException.findMany({
-        where: { professionalId, date: targetDate, isUnavailable: true },
+        where: { professionalId, date: targetDate },
+      }),
+      db.availabilityBlockRange.findMany({
+        where: {
+          professionalId,
+          dateFrom: { lte: targetDate },
+          dateTo: { gte: targetDate },
+        },
       }),
       db.service.findFirst({ where: { id: serviceId, tenantId } }),
       db.appointment.findMany({
@@ -226,8 +236,20 @@ export async function getProfessionalAvailability(
     ])
 
   if (!professional) return null
-  if (exceptions.length > 0) return { slots: [], reason: 'Profissional indisponível nesta data' }
-  if (availability.length === 0) return { slots: [], reason: 'Sem disponibilidade neste dia da semana' }
+  const fullBlockException = exceptions.find((e) => e.isUnavailable)
+  if (fullBlockException) return { slots: [], reason: 'Profissional indisponível nesta data' }
+  if (blockRanges.length > 0) return { slots: [], reason: 'Profissional indisponível nesta data' }
+
+  const availabilitySource =
+    overrides.length > 0
+      ? overrides.map((o) => ({
+          startTime: o.startTime,
+          endTime: o.endTime,
+          slotDurationMin: o.slotDurationMin,
+        }))
+      : availability
+
+  if (availabilitySource.length === 0) return { slots: [], reason: 'Sem disponibilidade neste dia da semana' }
 
   const slotDuration = service?.durationMin ?? 50
   const slots: { time: string; endTime: string; scheduledAt: string }[] = []
@@ -240,7 +262,22 @@ export async function getProfessionalAvailability(
     }
   }
 
-  for (const avail of availability) {
+  for (const e of exceptions) {
+    if (e.isUnavailable || !e.slotMask) continue
+    const arr = Array.isArray(e.slotMask) ? e.slotMask : []
+    for (const w of arr) {
+      const slot = w as { startTime?: string; endTime?: string } | null
+      if (slot && typeof slot.startTime === 'string' && typeof slot.endTime === 'string') {
+        const [sh, sm] = slot.startTime.split(':').map(Number)
+        const [eh, em] = slot.endTime.split(':').map(Number)
+        const start = sh * 60 + (sm ?? 0)
+        const end = eh * 60 + (em ?? 0)
+        for (let m = start; m < end; m++) bookedMinutes.add(m)
+      }
+    }
+  }
+
+  for (const avail of availabilitySource) {
     const [sh, sm] = avail.startTime.split(':').map(Number)
     const [eh, em] = avail.endTime.split(':').map(Number)
     let current = sh! * 60 + (sm ?? 0)

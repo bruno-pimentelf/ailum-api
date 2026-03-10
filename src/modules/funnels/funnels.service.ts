@@ -33,13 +33,42 @@ export async function updateFunnel(
   db: PrismaClient,
   tenantId: string,
   id: string,
-  body: { name?: string; description?: string; order?: number },
+  body: { name?: string; description?: string; order?: number; isDefault?: boolean },
 ) {
+  if (body.isDefault === true) {
+    await db.funnel.updateMany({
+      where: { tenantId },
+      data: { isDefault: false },
+    })
+  }
   return db.funnel.update({ where: { id, tenantId }, data: body })
 }
 
 export async function deleteFunnel(db: PrismaClient, tenantId: string, id: string) {
   return db.funnel.update({ where: { id, tenantId }, data: { isActive: false } })
+}
+
+/**
+ * Retorna o primeiro stage do funil de entrada (isDefault=true ou primeiro por order).
+ * Usado para atribuir contatos sem stage quando enviam a primeira mensagem.
+ */
+export async function getEntryFunnelFirstStage(
+  db: PrismaClient,
+  tenantId: string,
+): Promise<{ stageId: string; funnelId: string } | null> {
+  const funnel = await db.funnel.findFirst({
+    where: { tenantId, isActive: true },
+    orderBy: [{ isDefault: 'desc' }, { order: 'asc' }],
+    select: { id: true },
+  })
+  if (!funnel) return null
+  const stage = await db.stage.findFirst({
+    where: { funnelId: funnel.id, tenantId },
+    orderBy: { order: 'asc' },
+    select: { id: true, funnelId: true },
+  })
+  if (!stage) return null
+  return { stageId: stage.id, funnelId: stage.funnelId }
 }
 
 // ─── Default funnel (para tenants sem fluxo configurado) ────────────────────────
@@ -112,6 +141,7 @@ export async function createDefaultFunnel(db: PrismaClient, tenantId: string) {
       name: 'Funil Principal',
       description: 'Funil padrão de atendimento para novos pacientes.',
       isActive: true,
+      isDefault: true,
       order: 0,
     },
   })
@@ -339,7 +369,10 @@ export async function updateTrigger(
 }
 
 export async function deleteTrigger(db: PrismaClient, tenantId: string, id: string) {
-  return db.trigger.delete({ where: { id, tenantId } })
+  return db.$transaction([
+    db.triggerExecution.deleteMany({ where: { triggerId: id } }),
+    db.trigger.delete({ where: { id, tenantId } }),
+  ]).then(([, trigger]) => trigger)
 }
 
 export async function toggleTrigger(db: PrismaClient, tenantId: string, id: string) {

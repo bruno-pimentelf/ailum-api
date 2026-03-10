@@ -286,6 +286,82 @@ export function createTriggerWorker(fastify: FastifyInstance) {
         return
       }
 
+      // ── Single-contact trigger check (STAGE_ENTERED etc) ─────────────────────
+      if (job.name === 'trigger-contact' && data.tenantId && data.contactId) {
+        const contact = await fastify.db.contact.findFirst({
+          where: { id: data.contactId, tenantId: data.tenantId, isActive: true },
+          select: {
+            id: true, tenantId: true, phone: true, name: true, status: true,
+            currentStageId: true, stageEnteredAt: true, lastMessageAt: true,
+            lastDetectedIntent: true, lastPaymentStatus: true,
+          },
+        })
+        if (contact?.currentStageId) {
+          const triggers = await fastify.db.trigger.findMany({
+            where: { stageId: contact.currentStageId, tenantId: data.tenantId, isActive: true },
+          })
+          const nextAppointment = await fastify.db.appointment.findFirst({
+            where: {
+              contactId: contact.id,
+              tenantId: contact.tenantId,
+              status: 'CONFIRMED',
+              scheduledAt: { gt: new Date() },
+            },
+            orderBy: { scheduledAt: 'asc' },
+            select: { scheduledAt: true },
+          })
+          for (const trigger of triggers) {
+            const cooldownKey = `trigger_fired:${trigger.id}:${contact.id}`
+            if (await fastify.redis.exists(cooldownKey)) continue
+            const shouldFire = checkCondition(
+              trigger.event,
+              contact,
+              { event: trigger.event, delayMinutes: trigger.delayMinutes, conditionConfig: trigger.conditionConfig },
+              nextAppointment,
+            )
+            if (!shouldFire) continue
+            await fastify.redis.set(cooldownKey, '1', 'EX', trigger.cooldownSeconds)
+            const actionConfig = trigger.actionConfig as TriggerActionConfig
+            try {
+              switch (trigger.action) {
+                case 'SEND_MESSAGE':
+                  await executeSendMessage(actionConfig, contact, nextAppointment, fastify)
+                  break
+                case 'MOVE_STAGE':
+                  await executeMoveStage(actionConfig, contact, fastify)
+                  break
+                default:
+                  continue
+              }
+              await fastify.db.triggerExecution.create({
+                data: {
+                  triggerId: trigger.id,
+                  contactId: contact.id,
+                  tenantId: contact.tenantId,
+                  result: { action: trigger.action, success: true },
+                  aiGenerated: actionConfig.useAI ?? false,
+                },
+              })
+              fastify.log.info(
+                { triggerId: trigger.id, contactId: contact.id, action: trigger.action },
+                'trigger-engine:fired',
+              )
+            } catch (err) {
+              fastify.log.error({ err, triggerId: trigger.id, contactId: contact.id }, 'trigger-engine:action_error')
+              await fastify.db.triggerExecution.create({
+                data: {
+                  triggerId: trigger.id,
+                  contactId: contact.id,
+                  tenantId: contact.tenantId,
+                  result: { action: trigger.action, success: false, error: String(err) },
+                },
+              }).catch(() => {})
+            }
+          }
+        }
+        if (job.name === 'trigger-contact') return
+      }
+
       // ── Repeatable full scan ────────────────────────────────────────────────
       const activeTenants = await fastify.db.tenant.findMany({
         where: { isActive: true },

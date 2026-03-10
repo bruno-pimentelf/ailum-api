@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { FastifyInstance } from 'fastify'
 import { env } from '../../config/env.js'
 import type { ContextMessage } from '../../types/context.js'
+import { extractJson } from './parse-json.js'
 
 const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
 
@@ -72,11 +73,9 @@ export async function consolidateMemories(
       .join('')
       .trim()
 
-    let facts: MemoryFact[] = []
-    try {
-      facts = JSON.parse(text) as MemoryFact[]
-    } catch {
-      fastify.log.warn({ text }, 'memory:consolidate:parse_error')
+    const facts = extractJson<MemoryFact[]>(text)
+    if (!facts || !Array.isArray(facts)) {
+      if (text.length > 0) fastify.log.warn({ text: text.slice(0, 200) }, 'memory:consolidate:parse_error')
       return
     }
 

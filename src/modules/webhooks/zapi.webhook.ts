@@ -446,8 +446,6 @@ async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPay
     return
   }
 
-  // Para fromMe, o "contato" é identificado pelo phone do chat (quem recebeu)
-  // Para mensagens do contato, o phone é quem enviou
   const contactName =
     payload.senderName && payload.senderName !== phone
       ? payload.senderName

@@ -17,6 +17,7 @@ function buildTimeSlots(
   existingAppointments: { scheduledAt: Date; durationMin: number }[],
   /** Em minutos desde meia-noite. Slots que começam antes são excluídos (já passaram). */
   minStartMinutesFromMidnight?: number,
+  slotMaskWindows?: Array<{ startTime: string; endTime: string }>,
 ): AvailableSlot[] {
   const slots: AvailableSlot[] = []
   const [startH, startM] = startTime.split(':').map(Number)
@@ -31,6 +32,13 @@ function buildTimeSlots(
     for (let m = apptStart; m < apptStart + appt.durationMin; m++) {
       bookedMinutes.add(m)
     }
+  }
+  for (const w of slotMaskWindows ?? []) {
+    const [sh, sm] = w.startTime.split(':').map(Number)
+    const [eh, em] = w.endTime.split(':').map(Number)
+    const wStart = sh * 60 + (sm ?? 0)
+    const wEnd = eh * 60 + (em ?? 0)
+    for (let m = wStart; m < wEnd; m++) bookedMinutes.add(m)
   }
 
   while (current + slotDurationMin <= end) {
@@ -148,13 +156,18 @@ export async function buildContext(
       },
     }),
 
-    // 6. Professionals available today (with availability + exceptions + services for create_appointment)
+    // 6. Professionals available today (availability + overrides + exceptions + block ranges)
     db.professional.findMany({
       where: { tenantId, isActive: true },
       include: {
         availability: { where: { dayOfWeek: todayDow } },
-        availabilityExceptions: {
-          where: { date: todayDate, isUnavailable: true },
+        availabilityOverrides: { where: { date: todayDate } },
+        availabilityExceptions: { where: { date: todayDate } },
+        availabilityBlockRanges: {
+          where: {
+            dateFrom: { lte: todayDate },
+            dateTo: { gte: todayDate },
+          },
         },
         appointments: {
           where: {
@@ -200,19 +213,39 @@ export async function buildContext(
 
   const availableProfessionals: AvailableProfessional[] = []
   for (const prof of professionalsRaw) {
-    // Skip if has an exception (holiday/day off)
-    if (prof.availabilityExceptions.length > 0) continue
-    // Skip if no availability configured for today
-    if (prof.availability.length === 0) continue
+    const fullBlock = prof.availabilityExceptions.find((e: { isUnavailable: boolean }) => e.isUnavailable)
+    if (fullBlock) continue
+    if (prof.availabilityBlockRanges.length > 0) continue
+
+    const slotMaskWindows = prof.availabilityExceptions
+      .filter((e: { isUnavailable: boolean; slotMask: unknown }) => !e.isUnavailable && e.slotMask)
+      .flatMap((e: { slotMask: unknown }) => {
+        const arr = Array.isArray(e.slotMask) ? e.slotMask : []
+        return arr
+          .filter((w: unknown) => w && typeof w === 'object' && 'startTime' in w && 'endTime' in w)
+          .map((w: { startTime: string; endTime: string }) => ({ startTime: w.startTime, endTime: w.endTime }))
+      })
+
+    const availabilitySource =
+      prof.availabilityOverrides.length > 0
+        ? prof.availabilityOverrides.map((o: { startTime: string; endTime: string; slotDurationMin: number }) => ({
+            startTime: o.startTime,
+            endTime: o.endTime,
+            slotDurationMin: o.slotDurationMin,
+          }))
+        : prof.availability
+
+    if (availabilitySource.length === 0) continue
 
     const slots: AvailableSlot[] = []
-    for (const avail of prof.availability) {
+    for (const avail of availabilitySource) {
       const built = buildTimeSlots(
         avail.startTime,
         avail.endTime,
         avail.slotDurationMin,
         prof.appointments,
         minStartMinutes,
+        slotMaskWindows,
       )
       slots.push(...built)
     }

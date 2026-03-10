@@ -10,7 +10,14 @@ export const CreateFunnelSchema = Type.Object({
   order: Type.Optional(Type.Integer({ minimum: 0, default: 0 })),
 })
 
-export const UpdateFunnelSchema = Type.Partial(CreateFunnelSchema)
+export const UpdateFunnelSchema = Type.Partial(
+  Type.Object({
+    name: Type.String({ minLength: 1 }),
+    description: Type.String(),
+    order: Type.Integer({ minimum: 0 }),
+    isDefault: Type.Boolean(),
+  }),
+)
 
 export const CreateStageSchema = Type.Object({
   name: Type.String({ minLength: 1 }),

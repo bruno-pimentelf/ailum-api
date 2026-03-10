@@ -9,20 +9,24 @@ const BASE_DELAY_BEFORE_REPLY_MS = 1200
 const BASE_DELAY_BETWEEN_CHUNKS_MS = 900
 const MAX_DELAY_BEFORE_MS = 5500
 const MAX_DELAY_BETWEEN_MS = 3200
-const MIN_CHUNK_LENGTH = 15
+const MIN_CHUNK_LENGTH = 50
 
 function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length
 }
+
+/** Protege abreviações para não cortar (ex: "Dr. Bruno" fica junto) */
+const PROTECT_ABBREV = /\b(Dr\.?|Dra\.?|Sr\.?|Sra\.?|Srta\.?|Prof\.?)\s+/gi
 
 /** Divide o texto em partes naturais (frases) para parecer mais humano. */
 export function splitIntoChunks(text: string): string[] {
   const trimmed = text.trim()
   if (!trimmed) return []
 
-  const sentences = trimmed
+  const toSplit = trimmed.replace(PROTECT_ABBREV, (m) => m.replace(/\s+$/, '\x01'))
+  const sentences = toSplit
     .split(/(?<=[.!?])\s+|\n+/)
-    .map((s) => s.trim())
+    .map((s) => s.replace(/\x01/g, ' ').trim())
     .filter(Boolean)
 
   if (sentences.length <= 1) return [trimmed]

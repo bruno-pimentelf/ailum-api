@@ -72,8 +72,15 @@ export async function searchAvailability(
     where: { tenantId, isActive: true },
     include: {
       availability: { where: { dayOfWeek } },
-      availabilityExceptions: {
-        where: { date: dateStart, isUnavailable: true },
+      availabilityExceptions: { where: { date: dateStart } },
+      availabilityOverrides: {
+        where: { date: dateStart },
+      },
+      availabilityBlockRanges: {
+        where: {
+          dateFrom: { lte: dateStart },
+          dateTo: { gte: dateStart },
+        },
       },
       appointments: {
         where: {
@@ -94,8 +101,21 @@ export async function searchAvailability(
   const professionals: AvailabilityProfessional[] = []
 
   for (const prof of professionalsRaw) {
-    if (prof.availabilityExceptions.length > 0) continue
-    if (prof.availability.length === 0) continue
+    const fullBlockException = prof.availabilityExceptions.find((e) => e.isUnavailable)
+    if (fullBlockException) continue
+    if (prof.availabilityBlockRanges.length > 0) continue
+
+    const slotMaskWindows = collectSlotMaskFromExceptions(prof.availabilityExceptions)
+
+    const availabilitySource = prof.availabilityOverrides.length > 0
+      ? prof.availabilityOverrides.map((o) => ({
+          startTime: o.startTime,
+          endTime: o.endTime,
+          slotDurationMin: o.slotDurationMin,
+        }))
+      : prof.availability
+
+    if (availabilitySource.length === 0) continue
 
     const services = prof.professionalServices.map((ps) => ({
       id: ps.service.id,
@@ -107,9 +127,10 @@ export async function searchAvailability(
     if (services.length === 0) continue
 
     const slots = buildTimeSlotsForDate(
-      prof.availability,
+      availabilitySource,
       prof.appointments,
       minStart,
+      slotMaskWindows,
     )
 
     if (slots.length > 0) {
@@ -141,7 +162,12 @@ export async function searchAvailability(
         },
         availabilityExceptions: {
           where: { date: dateStart },
-          select: { isUnavailable: true, reason: true },
+          select: { isUnavailable: true, reason: true, slotMask: true },
+        },
+        availabilityOverrides: { where: { date: dateStart }, select: { id: true } },
+        availabilityBlockRanges: {
+          where: { dateFrom: { lte: dateStart }, dateTo: { gte: dateStart } },
+          select: { reason: true },
         },
       },
     })
@@ -153,8 +179,10 @@ export async function searchAvailability(
       totalProfessionals: allProfs.length,
       professionalsDetail: allProfs.map((p) => {
         const availDays = [...new Set(p.availability.map((a) => DAY_NAMES[a.dayOfWeek]!))]
-        const hasAvailForDay = p.availability.some((a) => a.dayOfWeek === dayOfWeek)
-        const exception = p.availabilityExceptions[0]
+        const hasAvailForDay =
+          p.availability.some((a) => a.dayOfWeek === dayOfWeek) || p.availabilityOverrides.length > 0
+        const fullBlock = p.availabilityExceptions.find((e) => e.isUnavailable)
+        const blockRange = p.availabilityBlockRanges[0]
         return {
           id: p.id,
           fullName: p.fullName,
@@ -162,9 +190,9 @@ export async function searchAvailability(
           availabilityDays: availDays,
           hasConsultationServices: p.professionalServices.length > 0,
           serviceCount: p.professionalServices.length,
-          hasExceptionForDate: exception?.isUnavailable ?? false,
+          hasExceptionForDate: !!fullBlock,
           exclusionReason:
-            exception?.isUnavailable && exception.reason ? exception.reason : undefined,
+            fullBlock?.reason ?? blockRange?.reason ?? undefined,
         }
       }),
     }
@@ -178,10 +206,27 @@ export async function searchAvailability(
   }
 }
 
+function collectSlotMaskFromExceptions(
+  exceptions: { isUnavailable: boolean; slotMask: unknown }[],
+): Array<{ startTime: string; endTime: string }> {
+  const windows: Array<{ startTime: string; endTime: string }> = []
+  for (const e of exceptions) {
+    if (e.isUnavailable || !e.slotMask) continue
+    const arr = Array.isArray(e.slotMask) ? e.slotMask : []
+    for (const w of arr) {
+      if (w && typeof w === 'object' && typeof w.startTime === 'string' && typeof w.endTime === 'string') {
+        windows.push({ startTime: w.startTime, endTime: w.endTime })
+      }
+    }
+  }
+  return windows
+}
+
 function buildTimeSlotsForDate(
   availability: { startTime: string; endTime: string; slotDurationMin: number }[],
   existingAppointments: { scheduledAt: Date; durationMin: number }[],
   minStartMinutesFromMidnight?: number,
+  slotMaskWindows?: Array<{ startTime: string; endTime: string }>,
 ): AvailabilitySlot[] {
   const slots: AvailabilitySlot[] = []
   const bookedMinutes = new Set<number>()
@@ -189,6 +234,16 @@ function buildTimeSlotsForDate(
   for (const appt of existingAppointments) {
     const apptStart = appt.scheduledAt.getHours() * 60 + appt.scheduledAt.getMinutes()
     for (let m = apptStart; m < apptStart + appt.durationMin; m++) {
+      bookedMinutes.add(m)
+    }
+  }
+
+  for (const w of slotMaskWindows ?? []) {
+    const [sh, sm] = w.startTime.split(':').map(Number)
+    const [eh, em] = w.endTime.split(':').map(Number)
+    const start = sh * 60 + (sm ?? 0)
+    const end = eh * 60 + (em ?? 0)
+    for (let m = start; m < end; m++) {
       bookedMinutes.add(m)
     }
   }

@@ -313,9 +313,11 @@ model Professional {
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now()) @db.Timestamptz
 
-  availability         ProfessionalAvailability[]
-  availabilityExceptions AvailabilityException[]
-  professionalServices ProfessionalService[]
+  availability            ProfessionalAvailability[]
+  availabilityExceptions  AvailabilityException[]
+  availabilityOverrides   AvailabilityOverride[]
+  availabilityBlockRanges AvailabilityBlockRange[]
+  professionalServices    ProfessionalService[]
   tenantMembers        TenantMember[]
   appointments         Appointment[]
   contacts             Contact[]
@@ -342,8 +344,37 @@ model AvailabilityException {
   date           DateTime     @db.Date
   isUnavailable  Boolean      @default(true)
   reason         String?
+  /// Quando isUnavailable=false: janelas a remover da grade semanal (bloqueios parciais).
+  /// Ex: [{ "startTime": "09:00", "endTime": "12:00" }] = disponível exceto 9h-12h.
+  slotMask       Json?
 
   @@map("availability_exceptions")
+}
+
+/// Disponibilidade em data específica (sobrescreve o padrão semanal).
+/// Ex: "Sábado 15/03 tenho 09:00-12:00" mesmo sem sábado na grade semanal.
+model AvailabilityOverride {
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  professionalId   String       @db.Uuid
+  professional     Professional @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  date             DateTime     @db.Date
+  startTime        String
+  endTime          String
+  slotDurationMin  Int          @default(50)
+
+  @@map("availability_overrides")
+}
+
+/// Bloqueia um intervalo de datas (ex: férias 10/03-20/03).
+model AvailabilityBlockRange {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  professionalId String       @db.Uuid
+  professional   Professional @relation(fields: [professionalId], references: [id], onDelete: Cascade)
+  dateFrom       DateTime     @db.Date
+  dateTo         DateTime     @db.Date
+  reason         String?
+
+  @@map("availability_block_ranges")
 }
 
 // ─────────────────────────────────────────────
@@ -410,6 +441,7 @@ model Funnel {
   name        String
   description String?
   isActive    Boolean  @default(true)
+  isDefault   Boolean  @default(false)
   order       Int
   createdAt   DateTime @default(now()) @db.Timestamptz
 

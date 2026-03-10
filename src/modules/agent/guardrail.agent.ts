@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { FastifyInstance } from 'fastify'
 import { env } from '../../config/env.js'
 import type { AgentContext } from '../../types/context.js'
+import { extractJson } from './parse-json.js'
 import type { ToolCallRecord } from './stage.agent.js'
 
 const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
@@ -78,7 +79,10 @@ ${reply}${toolSummary}`
       .map((b) => b.text)
       .join('')
 
-    const parsed = JSON.parse(text.trim()) as Omit<GuardrailResult, 'safeReply'>
+    const parsed = extractJson<Omit<GuardrailResult, 'safeReply'>>(text)
+    if (!parsed) {
+      return { approved: true, violation: null, severity: null, safeReply: null }
+    }
 
     if (parsed.approved) {
       return { approved: true, violation: null, severity: null, safeReply: null }
