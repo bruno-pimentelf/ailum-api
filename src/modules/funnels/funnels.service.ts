@@ -50,9 +50,9 @@ const DEFAULT_STAGES = [
     color: '#64748b',
     order: 0,
     isTerminal: false,
-    agentName: 'Ailum',
+    agentName: 'Recepção',
     agentPersonality:
-      'Você é Ailum, assistente virtual da clínica. Seja calorosa e acolhedora. ' +
+      'Você é da recepção da clínica. Seja cordial e acolhedora, como secretária falando com paciente. ' +
       'Qualifique o lead e facilite o agendamento. Quando tiver profissional, serviço e horário acordados, use create_appointment.',
     stageContext:
       'Contato inicial. Apresente a clínica, profissionais e serviços. Quando o contato escolher horário e confirmar, chame create_appointment. Use os IDs do contexto (profissionais e serviços).',
@@ -63,7 +63,7 @@ const DEFAULT_STAGES = [
     color: '#3b82f6',
     order: 1,
     isTerminal: false,
-    agentName: 'Ailum',
+    agentName: 'Recepção',
     agentPersonality:
       'Você está conversando com alguém interessado em consulta. ' +
       'Seja entusiasmada e facilite o agendamento. Mostre disponibilidade e valor. Quando confirmar, chame create_appointment.',
@@ -76,7 +76,7 @@ const DEFAULT_STAGES = [
     color: '#10b981',
     order: 2,
     isTerminal: false,
-    agentName: 'Ailum',
+    agentName: 'Recepção',
     agentPersonality:
       'O paciente tem uma consulta agendada. Seja confirmadora e apoiadora. ' +
       'Envie lembretes amigáveis e responda dúvidas sobre a consulta. Pagamento será tratado na clínica.',
@@ -89,7 +89,7 @@ const DEFAULT_STAGES = [
     color: '#8b5cf6',
     order: 3,
     isTerminal: true,
-    agentName: 'Ailum',
+    agentName: 'Recepção',
     agentPersonality:
       'O paciente foi atendido. Seja grata e encoraje o retorno. ' +
       'Pergunte sobre a experiência e ofereça agendar retorno.',
@@ -154,7 +154,7 @@ export async function createDefaultFunnel(db: PrismaClient, tenantId: string) {
         action: 'SEND_MESSAGE',
         actionConfig: {
           useAI: false,
-          message: `Olá! Sou o assistente virtual de ${tenantName} 👋\nFico feliz em receber você! Como posso te ajudar hoje?`,
+          message: `Olá, tudo bem? Que bom falar com você. Como posso ajudar hoje?`,
         },
         delayMinutes: 0,
         cooldownSeconds: 86400,

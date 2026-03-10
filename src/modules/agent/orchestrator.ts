@@ -7,6 +7,12 @@ import { applyGuardrails } from './guardrail.agent.js'
 import { consolidateMemories } from './memory.service.js'
 import { FirebaseSyncService } from '../../services/firebase-sync.service.js'
 import { ZapiService } from '../../services/zapi.service.js'
+import {
+  splitIntoChunks,
+  computeDelayBeforeReply,
+  computeDelayBetweenChunks,
+  sleep,
+} from './humanize-message.js'
 
 // ─── Result types ─────────────────────────────────────────────────────────────
 
@@ -282,6 +288,34 @@ export async function orchestrate(
       },
     })
 
+    const createAppointmentSuccess = stageResult.toolCalls.find(
+      (t) => t.name === 'create_appointment' && t.result.success && t.result.data,
+    )
+    if (createAppointmentSuccess?.result.data) {
+      const d = createAppointmentSuccess.result.data as {
+        scheduledAtFormatted?: string
+        professionalName?: string | null
+        serviceName?: string | null
+        durationMin?: number
+        appointmentId?: string
+        scheduledAt?: string
+      }
+      const detailLine = d.scheduledAtFormatted
+        ? `${d.scheduledAtFormatted} — ${d.professionalName ?? '?'}, ${d.serviceName ?? '?'}${d.durationMin ? ` (${d.durationMin} min)` : ''}`
+        : 'Consulta agendada com sucesso'
+      audit.push({
+        label: 'Consulta agendada',
+        detail: detailLine,
+        data: {
+          appointmentId: d.appointmentId,
+          scheduledAt: d.scheduledAt,
+          professionalName: d.professionalName,
+          serviceName: d.serviceName,
+          durationMin: d.durationMin,
+        },
+      })
+    }
+
     // 8. Apply guardrails
     const guardrail = await applyGuardrails(
       stageResult.reply,
@@ -303,23 +337,64 @@ export async function orchestrate(
       : 'Resposta enviada no WhatsApp'
     audit.push({ label: 'Resultado', detail: deliveryNote })
 
-    // 9. Save agent reply to DB
-    const savedMessage = await fastify.db.message.create({
-      data: {
+    // 9. Humanização: dividir resposta em partes e enviar com delay (simula digitação humana)
+    const chunks = splitIntoChunks(finalReply)
+    const initialDelayMs = computeDelayBeforeReply(
+      message.trim().split(/\s+/).filter(Boolean).length,
+    )
+    await sleep(initialDelayMs)
+
+    let firstMessageId: string | null = null
+    const zapi =
+      !testMode && context.zapiIntegration?.isActive && context.zapiIntegration.instanceId
+        ? new ZapiService()
+        : null
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i]!
+      const savedMessage = await fastify.db.message.create({
+        data: {
+          tenantId,
+          contactId,
+          role: 'AGENT',
+          type: 'TEXT',
+          content: chunk,
+          metadata: {
+            intent: routing.intent,
+            confidence: routing.confidence,
+            guardrailApplied: !guardrail.approved,
+            chunkIndex: i,
+            totalChunks: chunks.length,
+          },
+        },
+      })
+      if (!firstMessageId) firstMessageId = savedMessage.id
+
+      await sync.syncMessage({
         tenantId,
         contactId,
+        messageId: savedMessage.id,
         role: 'AGENT',
         type: 'TEXT',
-        content: finalReply,
-        metadata: {
-          intent: routing.intent,
-          confidence: routing.confidence,
-          guardrailApplied: !guardrail.approved,
-        },
-      },
-    })
+        content: chunk,
+        createdAt: savedMessage.createdAt,
+      })
 
-    // Update contact last message timestamp
+      if (zapi && context.zapiIntegration) {
+        await zapi.sendText({
+          instanceId: context.zapiIntegration.instanceId!,
+          apiKey: context.zapiIntegration.apiKey,
+          phone: context.contact.phone,
+          message: chunk,
+        })
+      }
+
+      if (i < chunks.length - 1) {
+        const wordCount = chunk.trim().split(/\s+/).filter(Boolean).length
+        await sleep(computeDelayBetweenChunks(wordCount))
+      }
+    }
+
     await fastify.db.contact.update({
       where: { id: contactId },
       data: {
@@ -327,17 +402,6 @@ export async function orchestrate(
         lastDetectedIntent: routing.intent,
         updatedAt: new Date(),
       },
-    })
-
-    // 10. Sync to Firestore
-    await sync.syncMessage({
-      tenantId,
-      contactId,
-      messageId: savedMessage.id,
-      role: 'AGENT',
-      type: 'TEXT',
-      content: finalReply,
-      createdAt: savedMessage.createdAt,
     })
 
     await sync.updateContactPresence({
@@ -348,28 +412,13 @@ export async function orchestrate(
       lastMessageAt: new Date(),
     })
 
-    // Send via WhatsApp (skip em modo playground/teste)
-    if (
-      !testMode &&
-      context.zapiIntegration?.isActive &&
-      context.zapiIntegration.instanceId
-    ) {
-      const zapi = new ZapiService()
-      await zapi.sendText({
-        instanceId: context.zapiIntegration.instanceId,
-        apiKey: context.zapiIntegration.apiKey,
-        phone: context.contact.phone,
-        message: finalReply,
-      })
-    }
-
-    // 11. Turn off typing indicator
+    // 10. Turn off typing indicator
     await setAgentTyping(false, contactId, tenantId, fastify)
 
     const durationMs = Date.now() - startedAt
 
     // 12. Log to agent_job_logs
-    await writeAudit('REPLIED', savedMessage.id, {
+    await writeAudit('REPLIED', firstMessageId ?? null, {
       routerIntent: routing.intent,
       routerConfidence: routing.confidence ?? undefined,
       stageAgentToolCalls: stageResult.toolCalls.length,
@@ -460,41 +509,58 @@ export async function confirmAndExecute(
 
     const confirmationReply = state.agentReply
 
-    // Save confirmation reply
-    const savedMessage = await fastify.db.message.create({
-      data: {
-        tenantId,
-        contactId,
-        role: 'AGENT',
-        type: 'TEXT',
-        content: confirmationReply,
-        metadata: { confirmedTools: state.toolCalls.map((t) => t.name) },
-      },
-    })
+    const chunks = splitIntoChunks(confirmationReply)
+    await sleep(computeDelayBeforeReply(5))
 
-    await sync.syncMessage({
-      tenantId,
-      contactId,
-      messageId: savedMessage.id,
-      role: 'AGENT',
-      type: 'TEXT',
-      content: confirmationReply,
-      createdAt: savedMessage.createdAt,
-    })
-
-    // Send via WhatsApp (skip em modo playground/teste)
-    if (
+    const zapi =
       !confirmTestMode &&
       context.zapiIntegration?.isActive &&
       context.zapiIntegration.instanceId
-    ) {
-      const zapi = new ZapiService()
-      await zapi.sendText({
-        instanceId: context.zapiIntegration.instanceId,
-        apiKey: context.zapiIntegration.apiKey,
-        phone: context.contact.phone,
-        message: confirmationReply,
+        ? new ZapiService()
+        : null
+
+    let firstMessageId: string | null = null
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i]!
+      const savedMessage = await fastify.db.message.create({
+        data: {
+          tenantId,
+          contactId,
+          role: 'AGENT',
+          type: 'TEXT',
+          content: chunk,
+          metadata: {
+            confirmedTools: state.toolCalls.map((t) => t.name),
+            chunkIndex: i,
+            totalChunks: chunks.length,
+          },
+        },
       })
+      if (!firstMessageId) firstMessageId = savedMessage.id
+
+      await sync.syncMessage({
+        tenantId,
+        contactId,
+        messageId: savedMessage.id,
+        role: 'AGENT',
+        type: 'TEXT',
+        content: chunk,
+        createdAt: savedMessage.createdAt,
+      })
+
+      if (zapi && context.zapiIntegration) {
+        await zapi.sendText({
+          instanceId: context.zapiIntegration.instanceId!,
+          apiKey: context.zapiIntegration.apiKey,
+          phone: context.contact.phone,
+          message: chunk,
+        })
+      }
+
+      if (i < chunks.length - 1) {
+        const wordCount = chunk.trim().split(/\s+/).filter(Boolean).length
+        await sleep(computeDelayBetweenChunks(wordCount))
+      }
     }
 
     await setAgentTyping(false, contactId, tenantId, fastify)
@@ -552,8 +618,14 @@ function summarizeToolResult(
       const slots = profsArr.reduce((acc, p) => acc + (p.slots?.length ?? 0), 0)
       return `${profs} profissional(is), ${slots} slot(s) em ${d?.date ?? '?'}`
     }
-    case 'create_appointment':
+    case 'create_appointment': {
+      const formatted = d?.scheduledAtFormatted as string | undefined
+      const prof = d?.professionalName as string | undefined
+      const svc = d?.serviceName as string | undefined
+      if (formatted && (prof || svc))
+        return `Agendado: ${formatted} — ${prof ?? '?'}, ${svc ?? '?'}`
       return `Agendado para ${d?.scheduledAt ?? '?'}`
+    }
     case 'generate_pix':
       return `PIX R$ ${d?.amount ?? '?'}`
     case 'move_stage':

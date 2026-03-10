@@ -20,10 +20,31 @@ export interface AvailabilityProfessional {
   slots: AvailabilitySlot[]
 }
 
+const DAY_NAMES = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'] as const
+
+export interface SearchAvailabilityDiagnostic {
+  date: string
+  dayOfWeek: number
+  dayName: string
+  totalProfessionals: number
+  professionalsDetail: Array<{
+    id: string
+    fullName: string
+    hasAvailabilityForDay: boolean
+    availabilityDays: string[]
+    hasConsultationServices: boolean
+    serviceCount: number
+    hasExceptionForDate: boolean
+    exclusionReason?: string
+  }>
+}
+
 export interface SearchAvailabilityResult {
   date: string
   dateFormatted: string
   professionals: AvailabilityProfessional[]
+  /** Quando professionals está vazio, traz contexto para a IA entender o motivo e sugerir ao usuário */
+  diagnostic?: SearchAvailabilityDiagnostic
 }
 
 /**
@@ -107,10 +128,53 @@ export async function searchAvailability(
   const year = dateStart.getFullYear()
   const dateFormatted = `${day}/${month}/${year}`
 
+  // Quando não há slots, retorna diagnóstico para a IA explicar ao usuário e sugerir verificação
+  let diagnostic: SearchAvailabilityDiagnostic | undefined
+  if (professionals.length === 0) {
+    const allProfs = await db.professional.findMany({
+      where: { tenantId, isActive: true },
+      include: {
+        availability: true,
+        professionalServices: {
+          where: { service: { isActive: true, isConsultation: true } },
+          select: { serviceId: true },
+        },
+        availabilityExceptions: {
+          where: { date: dateStart },
+          select: { isUnavailable: true, reason: true },
+        },
+      },
+    })
+
+    diagnostic = {
+      date: dateStr,
+      dayOfWeek,
+      dayName: DAY_NAMES[dayOfWeek],
+      totalProfessionals: allProfs.length,
+      professionalsDetail: allProfs.map((p) => {
+        const availDays = [...new Set(p.availability.map((a) => DAY_NAMES[a.dayOfWeek]!))]
+        const hasAvailForDay = p.availability.some((a) => a.dayOfWeek === dayOfWeek)
+        const exception = p.availabilityExceptions[0]
+        return {
+          id: p.id,
+          fullName: p.fullName,
+          hasAvailabilityForDay: hasAvailForDay,
+          availabilityDays: availDays,
+          hasConsultationServices: p.professionalServices.length > 0,
+          serviceCount: p.professionalServices.length,
+          hasExceptionForDate: exception?.isUnavailable ?? false,
+          exclusionReason:
+            exception?.isUnavailable && exception.reason ? exception.reason : undefined,
+        }
+      }),
+    }
+  }
+
   return {
     date: dateStr,
     dateFormatted,
     professionals,
+    ...(diagnostic && { diagnostic }),
   }
 }
 

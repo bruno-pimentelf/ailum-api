@@ -15,17 +15,19 @@ const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
 const MAX_TOOL_ITERATIONS = 5
 
 // ─── Layer 1: Immutable identity & global guardrails (always cached) ─────────
-const LAYER_1_IDENTITY = `Você é um assistente virtual de clínica médica no WhatsApp.
+const LAYER_1_IDENTITY = `Você é uma pessoa real da recepção da clínica, atendendo pelo WhatsApp. Fale como humano: natural, cordial, sem fórmulas de robô.
 
-REGRAS GLOBAIS INVIOLÁVEIS:
-- Nunca faça diagnóstico médico ou sugira tratamentos específicos
+PROIBIÇÕES ABSOLUTAS:
+- NUNCA diga "assistente virtual", "sou a Ailum", "sou um bot" ou similar — apresente-se como pessoa (ex: "Olá, tudo bem? Como posso ajudar?")
+- NUNCA use emojis em saudação ou resposta inicial — parecer humano, não robô
+- Nunca faça diagnóstico médico ou sugira tratamentos
 - Nunca prometa resultados terapêuticos
 - Nunca mencione concorrentes
 - Nunca confirme informações clínicas sem profissional responsável
-- Mantenha tom profissional, empático e brasileiro (PT-BR informal)
-- Respostas curtas e diretas — máximo 3 parágrafos no WhatsApp
-- Nunca use markdown (sem **, sem #, sem listas com -) — use texto corrido
-- Emojis com moderação: apenas 1 por mensagem, se adequado`
+- Use português correto, sem gírias inventadas
+- Tom profissional mas natural — como secretária falando com paciente
+- Respostas curtas, máximo 3 parágrafos
+- Nunca use markdown (sem **, sem #, sem listas) — texto corrido`
 
 export interface ToolCallRecord {
   name: string
@@ -106,7 +108,7 @@ export async function runStageAgent(
         ]
       : []),
 
-    // Layer 5 — available professionals today (dynamic)
+    // Layer 5 — available professionals today (dynamic) — mesma estrutura que search_availability retorna
     {
       type: 'text',
       text:
@@ -114,13 +116,13 @@ export async function runStageAgent(
           ? `PROFISSIONAIS DISPONÍVEIS HOJE:\n${context.availableProfessionals
               .map(
                 (p) =>
-                  `- ${p.fullName}${p.specialty ? ` (${p.specialty})` : ''} [id=${p.id}]: ${p.slots.map((s) => s.time).join(', ')}`,
+                  `- ${p.fullName}${p.specialty ? ` (${p.specialty})` : ''} [id=${p.id}]: slots ${p.slots.map((s) => s.time).join(', ')} | serviços ${(p.services ?? []).map((s) => `${s.name}[id=${s.id}]`).join(', ')}`,
               )
               .join('\n')}`
           : 'Não há profissionais disponíveis hoje.',
     },
 
-    // Layer 5b — services available for scheduling (dynamic)
+    // Layer 5b — services available for scheduling (legacy flat list, use serviços dentro de cada profissional acima)
     {
       type: 'text',
       text:
@@ -178,8 +180,8 @@ export async function runStageAgent(
           ? `FERRAMENTAS DISPONÍVEIS: ${allowedToolNames.join(', ')}`
           : 'Nenhuma ferramenta disponível neste stage — responda apenas com texto.',
         allowedToolNames.includes('create_appointment')
-          ? `REGRA create_appointment: Quando INTENÇÃO = CONFIRMING e você tiver horário + profissional + serviço, chame create_appointment. Use SEMPRE os IDs retornados por search_availability (ou PROFISSIONAIS DISPONÍVEIS HOJE se for hoje).
-scheduled_at: ISO 8601 com -03:00. Data: ${context.currentDate} (hoje) ou a data que o usuário escolheu. Ex: ${context.currentDateIsoExample}. Horas 00-23, minutos 00-59. "9:99" → corrija para 09:00.`
+          ? `REGRA create_appointment: Quando INTENÇÃO = CONFIRMING e você tiver horário + profissional + serviço, chame create_appointment IMEDIATAMENTE. Não pergunte "qual motivo" ou "qual serviço" — use o primeiro serviço do profissional se o contato não especificou (ex: "consulta de rotina" → serviço mais genérico disponível). Use SEMPRE os IDs de search_availability ou PROFISSIONAIS DISPONÍVEIS HOJE.
+scheduled_at: ISO 8601 com -03:00. Data: ${context.currentDate} (hoje) ou data escolhida. Ex: ${context.currentDateIsoExample}. Horas 00-23. "13:00" → 13:00:00-03:00.`
           : '',
         allowedToolNames.includes('move_stage')
           ? 'move_stage: Avance o contato para Qualificado quando demonstrar interesse em agendar. Após create_appointment o sistema move automaticamente para Consulta Agendada.'

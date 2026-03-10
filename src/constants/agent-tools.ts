@@ -10,27 +10,36 @@ export interface AgentToolDefinition {
 export const AGENT_TOOLS = {
   search_availability: {
     name: 'search_availability',
-    description:
-      'Search available appointment slots for a specific date. Call when the user mentions a date (e.g. "amanhã", "terça", "10/03"). Returns professionals with their IDs, services with IDs, and available time slots. Use the returned IDs for create_appointment.',
+    description: `Busca horários disponíveis para uma data. Chamar quando o usuário indicar um dia (ex: "amanhã", "terça", "10/03", "próxima semana").
+Retorna profissionais com id, nome, serviços (id, nome, duração, preço) e slots (time, endTime).
+Quando retorna 0 profissionais, o resultado inclui "diagnostic" com: profissionais ativos, se têm disponibilidade para o dia, se têm serviços de consulta vinculados, exceções. Use esse contexto para responder ao usuário de forma útil (ex: sugerir verificar vinculação de serviços ao profissional).`,
     input_schema: Type.Object({
       date: Type.String({
-        description: 'Date in YYYY-MM-DD format (e.g. 2026-03-10 for March 10, 2026)',
+        description: 'Data no formato YYYY-MM-DD (ex: 2026-03-10 para 10 de março de 2026)',
       }),
     }),
   },
 
   create_appointment: {
     name: 'create_appointment',
-    description:
-      'Schedule an appointment for the contact with a specific professional and service. Use when the contact agrees on a date and time.',
+    description: `Cria o agendamento após o contato confirmar data, horário, profissional e serviço.
+ATENÇÃO: professional_id e service_id são UUIDs DIFERENTES. professional_id = professional.id; service_id = professional.services[].id.
+SEMPRE use os IDs do retorno de search_availability: professional.id → professional_id; um dos professional.services[].id → service_id.
+scheduled_at: combine data + slot (ex: slot "09:00" e data 2026-03-10 → "2026-03-10T09:00:00-03:00"). Formato ISO 8601 com -03:00.`,
     input_schema: Type.Object({
-      professional_id: Type.String({ format: 'uuid', description: 'UUID of the professional' }),
-      service_id: Type.String({ format: 'uuid', description: 'UUID of the service' }),
+      professional_id: Type.String({
+        format: 'uuid',
+        description: 'professional.id — UUID do profissional (NÃO é o mesmo que service_id)',
+      }),
+      service_id: Type.String({
+        format: 'uuid',
+        description: 'professional.services[].id — UUID do serviço desse profissional (NÃO é o mesmo que professional_id)',
+      }),
       scheduled_at: Type.String({
         format: 'date-time',
-        description: 'ISO 8601 datetime for the appointment (e.g. 2025-03-15T14:00:00-03:00)',
+        description: 'Datetime ISO 8601 com -03:00 (ex: 2026-03-10T09:00:00-03:00)',
       }),
-      notes: Type.Optional(Type.String({ description: 'Additional notes for the appointment' })),
+      notes: Type.Optional(Type.String({ description: 'Observações adicionais para a consulta' })),
     }),
   },
 

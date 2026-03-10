@@ -97,6 +97,7 @@ export async function buildApp(): Promise<FastifyInstance> {
     async (v1) => {
       await v1.register(contactsRoutes, { prefix: '/contacts' })
       await v1.register(schedulingRoutes, { prefix: '/appointments' })
+      await v1.register(schedulingRoutes, { prefix: '/scheduling' })
       await v1.register(billingRoutes, { prefix: '/charges' })
       await v1.register(funnelsRoutes, { prefix: '/funnels' })
       await v1.register(professionalsRoutes, { prefix: '/professionals' })

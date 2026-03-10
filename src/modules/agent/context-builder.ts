@@ -148,7 +148,7 @@ export async function buildContext(
       },
     }),
 
-    // 6. Professionals available today (with availability + exceptions)
+    // 6. Professionals available today (with availability + exceptions + services for create_appointment)
     db.professional.findMany({
       where: { tenantId, isActive: true },
       include: {
@@ -162,6 +162,12 @@ export async function buildContext(
             status: { in: ['PENDING', 'CONFIRMED'] },
           },
           select: { scheduledAt: true, durationMin: true },
+        },
+        professionalServices: {
+          where: { service: { isActive: true, isConsultation: true } },
+          include: {
+            service: { select: { id: true, name: true, durationMin: true, price: true } },
+          },
         },
       },
     }),
@@ -211,11 +217,20 @@ export async function buildContext(
       slots.push(...built)
     }
 
-    if (slots.length > 0) {
+    const psList = prof.professionalServices ?? []
+    const services = psList.map((ps: { service: { id: string; name: string; durationMin: number; price: unknown } }) => ({
+      id: ps.service.id,
+      name: ps.service.name,
+      durationMin: ps.service.durationMin,
+      price: Number(ps.service.price),
+    }))
+
+    if (slots.length > 0 && services.length > 0) {
       availableProfessionals.push({
         id: prof.id,
         fullName: prof.fullName,
         specialty: prof.specialty,
+        services,
         slots,
       })
     }

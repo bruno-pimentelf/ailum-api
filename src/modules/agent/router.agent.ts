@@ -52,12 +52,14 @@ INTENÇÕES VÁLIDAS:
 EXEMPLOS (retorne JSON no mesmo formato):
 - "Quero 9:00", "pode ser às 9", "quero hoje" → intent: WANTS_SCHEDULE, confidence: 0.9
 - "Sim", "confirmo", "está certo", "pode ser" (após proposta de horário ou pedido de confirmação) → intent: CONFIRMING, confidence: 0.95
+- "10h", "9h", "às 10", "10:00" (resposta à pergunta "qual horário?") → intent: CONFIRMING, confidence: 0.95
 - Mensagem com nome + CPF + telefone (ex: "Daniel Moreira, 19054112786, 27995072522") após pedido desses dados → intent: CONFIRMING, confidence: 0.95
 - "Quero marcar uma consulta" ou "Oi, quero marcar uma consulta" → intent: WANTS_SCHEDULE, confidence: 0.95
 - "Quais profissionais disponíveis?" → intent: WANTS_INFO, confidence: 0.9
 - "Olá" sozinho → intent: GREETING, confidence: 0.9
 
 REGRAS:
+- CONTEXTO OBRIGATÓRIO: Se a ÚLTIMA mensagem do ASSISTENTE ofereceu horários (ex: "temos disponibilidade", "horários livres", "qual horário?", "10h, 13h, 14h") e a NOVA mensagem do contato é só um horário ("10h", "9h", "às 10") ou confirmação ("sim", "pode ser", "esse mesmo"), retorne SEMPRE intent: CONFIRMING e confidence: 0.95. O agente precisa disso para executar o agendamento.
 - CRISIS → always shouldEscalate: true
 - confidence < 0.70 → shouldEscalate: true
 - Saudação + pedido = classifique pelo pedido ("oi, quero consulta" → WANTS_SCHEDULE)
@@ -115,8 +117,34 @@ function parseRouterJson(raw: string): RouterResult {
   return normalizeParsed(parsed)
 }
 
+/** Detecta se a última mensagem do assistente foi oferta de horários OU pedido de confirmação para finalizar agendamento. */
+function lastAssistantMessageOfferedSlots(messages: AgentContext['messages']): boolean {
+  const lastFromAssistant = [...messages].reverse().find((m) => m.role === 'AGENT')
+  if (!lastFromAssistant || typeof lastFromAssistant.content !== 'string') return false
+  const text = lastFromAssistant.content.toLowerCase()
+  const slotOrConfirmCues =
+    /horário|horarios|disponibilidade|disponível|qual horário|qual período|período você prefere|temos (disponibilidade|horários)|livres?\b|(a partir das?|pela manhã|à tarde|\d{1,2}h|\d{1,2}:\d{2})|(às|as)\s+\d{1,2}h?|(me\s+)?confirma|finalizar o agendamento|para eu finalizar/i
+  return slotOrConfirmCues.test(text)
+}
+
+/** Mensagem curta que é escolha de horário ou confirmação. */
+function isShortTimeOrConfirmation(message: string): boolean {
+  const m = message.trim().toLowerCase().replace(/\s+/g, ' ')
+  if (m.length > 50) return false
+  if (
+    /^(sim|show|confirmo|confirmar|está certo|pode ser|isso mesmo|correto|desejo|por favor|esse mesmo|esse horário)$/.test(
+      m,
+    )
+  )
+    return true
+  if (/^\d{1,2}h$/i.test(m)) return true
+  if (/^\d{1,2}\s*:\s*\d{2}$/.test(m)) return true
+  if (/^às?\s*\d{1,2}h?/i.test(m) || /^as\s*\d{1,2}h?/i.test(m)) return true
+  return false
+}
+
 /** Fallback when LLM response fails to parse — infer intent from message content. */
-function keywordFallback(message: string): RouterResult {
+function keywordFallback(message: string, context?: AgentContext): RouterResult {
   const m = message.toLowerCase().trim()
   const digitsOnly = m.replace(/\D/g, '')
   const hasCpfLike = /\d{11}/.test(digitsOnly) || /^\d{3}\.?\d{3}\.?\d{3}-?\d{2}$/.test(m.trim())
@@ -131,6 +159,15 @@ function keywordFallback(message: string): RouterResult {
     return {
       intent: 'CONFIRMING',
       confidence: 0.75,
+      shouldEscalate: false,
+      escalationReason: null,
+      suggestedFunnelId: null,
+    }
+  }
+  if (context && lastAssistantMessageOfferedSlots(context.messages) && isShortTimeOrConfirmation(message)) {
+    return {
+      intent: 'CONFIRMING',
+      confidence: 0.95,
       shouldEscalate: false,
       escalationReason: null,
       suggestedFunnelId: null,
@@ -172,6 +209,20 @@ export async function routeMessage(
   message: string,
   context: AgentContext,
 ): Promise<RouterResult> {
+  // Early return: se o assistente ofereceu horários e o contato respondeu com horário ou confirmação → CONFIRMING (garante create_appointment)
+  if (
+    lastAssistantMessageOfferedSlots(context.messages) &&
+    isShortTimeOrConfirmation(message)
+  ) {
+    return {
+      intent: 'CONFIRMING',
+      confidence: 0.95,
+      shouldEscalate: false,
+      escalationReason: null,
+      suggestedFunnelId: null,
+    }
+  }
+
   const recentMessages = context.messages
     .slice(-3)
     .map((m) => `[${m.role}]: ${m.content}`)
@@ -209,7 +260,7 @@ Nova mensagem do contato: "${message}"`
         text.slice(0, 400),
       )
       console.warn('[router] parse error:', parseErr)
-      return keywordFallback(message)
+      return keywordFallback(message, context)
     }
 
     // Enforce CRISIS escalation regardless of confidence
@@ -225,9 +276,24 @@ Nova mensagem do contato: "${message}"`
         parsed.escalationReason ?? `Baixa confiança na classificação (${parsed.confidence})`
     }
 
+    // Regra de contexto: se o assistente acabou de oferecer horários e o contato respondeu com horário ou "sim", forçar CONFIRMING para o agente executar create_appointment
+    if (
+      lastAssistantMessageOfferedSlots(context.messages) &&
+      isShortTimeOrConfirmation(message) &&
+      parsed.intent !== 'CONFIRMING'
+    ) {
+      parsed = {
+        intent: 'CONFIRMING',
+        confidence: 0.95,
+        shouldEscalate: false,
+        escalationReason: null,
+        suggestedFunnelId: null,
+      }
+    }
+
     return parsed
   } catch (err) {
     console.warn('[router] request or parse failed, using keyword fallback:', err)
-    return keywordFallback(message)
+    return keywordFallback(message, context)
   }
 }

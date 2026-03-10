@@ -31,10 +31,18 @@ export interface AvailableSlot {
   endTime: string
 }
 
+export interface AvailableProfessionalService {
+  id: string
+  name: string
+  durationMin: number
+  price: number
+}
+
 export interface AvailableProfessional {
   id: string
   fullName: string
   specialty: string | null
+  services: AvailableProfessionalService[]
   slots: AvailableSlot[]
 }
 

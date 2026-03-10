@@ -45,7 +45,7 @@ Se não houver violação: { "approved": true, "violation": null, "severity": nu
 Responda APENAS o JSON, sem explicação.`
 
 const LOW_SEVERITY_REPLY =
-  'Estamos verificando as informações para você. Um momento! 😊'
+  'Estamos verificando as informações para você. Um momento.'
 
 export async function applyGuardrails(
   reply: string,
@@ -113,7 +113,7 @@ ${reply}${toolSummary}`
         approved: false,
         violation: parsed.violation,
         severity,
-        safeReply: 'Vou verificar essa informação com um especialista e retorno em breve. 😊',
+        safeReply: 'Vou verificar essa informação com um especialista e retorno em breve.',
       }
     }
 

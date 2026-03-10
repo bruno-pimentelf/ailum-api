@@ -163,12 +163,57 @@ async function createAppointment(
     }
   }
 
-  // Fetch service for duration
-  const service = await db.service.findFirst({
-    where: { id: input.service_id, tenantId: context.tenant.id },
-  })
+  // professional_id e service_id são DIFERENTES — não trocar. professional_id vem de professional.id, service_id de professional.services[].id
+  if (input.professional_id === input.service_id) {
+    return {
+      success: false,
+      requiresConfirmation: false,
+      reason:
+        'professional_id e service_id devem ser diferentes. Use professional.id para professional_id e um dos professional.services[].id para service_id.',
+    }
+  }
+
+  const [professional, service] = await Promise.all([
+    db.professional.findFirst({
+      where: { id: input.professional_id, tenantId: context.tenant.id },
+      select: { id: true },
+    }),
+    db.service.findFirst({
+      where: { id: input.service_id, tenantId: context.tenant.id },
+      select: { id: true, durationMin: true },
+    }),
+  ])
+
+  if (!professional) {
+    return {
+      success: false,
+      requiresConfirmation: false,
+      reason: 'Profissional não encontrado. Use professional_id do retorno de search_availability.',
+    }
+  }
   if (!service) {
-    return { success: false, requiresConfirmation: false, reason: 'Serviço não encontrado' }
+    return {
+      success: false,
+      requiresConfirmation: false,
+      reason: 'Serviço não encontrado. Use service_id de dentro de professional.services[].id.',
+    }
+  }
+
+  // Garante que o profissional oferece este serviço
+  const offersService = await db.professionalService.findUnique({
+    where: {
+      professionalId_serviceId: {
+        professionalId: input.professional_id,
+        serviceId: input.service_id,
+      },
+    },
+  })
+  if (!offersService) {
+    return {
+      success: false,
+      requiresConfirmation: false,
+      reason: 'Este profissional não oferece esse serviço. Use um service_id da lista de serviços do profissional escolhido.',
+    }
   }
 
   // Check for scheduling conflicts
@@ -240,13 +285,36 @@ async function createAppointment(
     lastMessageAt: new Date(),
   })
 
+  const withNames = await db.appointment.findUnique({
+    where: { id: appointment.id },
+    select: {
+      scheduledAt: true,
+      durationMin: true,
+      professional: { select: { fullName: true } },
+      service: { select: { name: true } },
+    },
+  })
+
+  const scheduledAtIso = appointment.scheduledAt.toISOString()
+  const scheduledAtFormatted =
+    appointment.scheduledAt.toLocaleString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+
   return {
     success: true,
     requiresConfirmation: true,
     data: {
       appointmentId: appointment.id,
-      scheduledAt: appointment.scheduledAt.toISOString(),
+      scheduledAt: scheduledAtIso,
       durationMin: appointment.durationMin,
+      professionalName: withNames?.professional?.fullName ?? null,
+      serviceName: withNames?.service?.name ?? null,
+      scheduledAtFormatted,
     },
   }
 }
