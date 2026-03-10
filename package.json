@@ -9,7 +9,7 @@
     "build": "tsc",
     "start": "tsx src/server.ts",
     "db:migrate": "prisma migrate dev",
-    "db:migrate:prod": "tsx --env-file=.env.production.local node_modules/prisma/build/index.js migrate deploy && pnpm db:generate",
+    "db:migrate:prod": "prisma migrate deploy && pnpm db:generate",
     "db:migrate:prod:resolve": "tsx --env-file=.env.production.local node_modules/prisma/build/index.js migrate resolve --rolled-back 20260309190000_add_search_availability_tool",
     "db:migrate:prod-local": "tsx --env-file=.env.production.local node_modules/prisma/build/index.js migrate deploy",
     "db:studio": "prisma studio",
