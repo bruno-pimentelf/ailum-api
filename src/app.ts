@@ -25,6 +25,7 @@ import { integrationsRoutes } from './modules/integrations/integrations.routes.j
 import { conversationsRoutes } from './modules/conversations/conversations.routes.js'
 import { authRoutes } from './modules/auth/auth.routes.js'
 import { agentRoutes } from './modules/agent/agent.routes.js'
+import { ailumAiRoutes } from './modules/ailum-ai/ailum-ai.routes.js'
 import { tenantRoutes } from './modules/tenant/tenant.routes.js'
 import { zapiWebhookRoutes } from './modules/webhooks/zapi.webhook.js'
 import { asaasWebhookRoutes } from './modules/webhooks/asaas.webhook.js'
@@ -108,6 +109,13 @@ export async function buildApp(): Promise<FastifyInstance> {
       await v1.register(conversationsRoutes, { prefix: '/conversations' })
       await v1.register(authRoutes, { prefix: '/auth' })
       await v1.register(tenantRoutes, { prefix: '/tenant' })
+      await v1.register(
+        async (scope) => {
+          await scope.register(rateLimit, { max: 20, timeWindow: '1 minute' })
+          await scope.register(ailumAiRoutes)
+        },
+        { prefix: '/ailum-ai' },
+      )
 
       // Agent — stricter rate limit (20/min per IP)
       await v1.register(

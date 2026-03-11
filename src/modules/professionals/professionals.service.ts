@@ -76,6 +76,24 @@ export async function getProfessionalAvailabilitySchedule(
   })
 }
 
+/** Remove toda a disponibilidade do profissional (grade, exceções, overrides, block ranges). Não altera appointments. */
+export async function clearProfessionalAvailability(
+  db: PrismaClient,
+  tenantId: string,
+  professionalId: string,
+) {
+  await db.professional.findFirstOrThrow({ where: { id: professionalId, tenantId } })
+
+  await Promise.all([
+    db.professionalAvailability.deleteMany({ where: { professionalId } }),
+    db.availabilityException.deleteMany({ where: { professionalId } }),
+    db.availabilityOverride.deleteMany({ where: { professionalId } }),
+    db.availabilityBlockRange.deleteMany({ where: { professionalId } }),
+  ])
+
+  return { cleared: true }
+}
+
 export async function setProfessionalAvailability(
   db: PrismaClient,
   tenantId: string,
@@ -111,6 +129,14 @@ export async function setProfessionalAvailability(
 
 // ─── Exceptions ───────────────────────────────────────────────────────────────
 
+function normalizeSlotMask(slotMask: Array<{ startTime: string; endTime: string }> | null | undefined): string {
+  if (!slotMask || slotMask.length === 0) return ''
+  const sorted = [...slotMask].sort(
+    (a, b) => a.startTime.localeCompare(b.startTime) || a.endTime.localeCompare(b.endTime),
+  )
+  return JSON.stringify(sorted)
+}
+
 export async function addAvailabilityException(
   db: PrismaClient,
   tenantId: string,
@@ -125,13 +151,30 @@ export async function addAvailabilityException(
   await db.professional.findFirstOrThrow({ where: { id: professionalId, tenantId } })
   const dateObj = new Date(body.date + 'T00:00:00')
   const isUnavailable = body.isUnavailable ?? true
+  const slotMask = body.slotMask && body.slotMask.length > 0 ? body.slotMask : undefined
+
+  const existing = await db.availabilityException.findMany({
+    where: { professionalId, date: dateObj },
+  })
+
+  if (isUnavailable) {
+    const dup = existing.find((e) => e.isUnavailable)
+    if (dup) return dup
+  } else if (slotMask) {
+    const targetNorm = normalizeSlotMask(slotMask)
+    const dup = existing.find(
+      (e) => !e.isUnavailable && e.slotMask && normalizeSlotMask(e.slotMask as Array<{ startTime: string; endTime: string }>) === targetNorm,
+    )
+    if (dup) return dup
+  }
+
   return db.availabilityException.create({
     data: {
       professionalId,
       date: dateObj,
       isUnavailable,
       reason: body.reason ?? null,
-      slotMask: body.slotMask && body.slotMask.length > 0 ? body.slotMask : undefined,
+      slotMask,
     },
   })
 }
@@ -159,12 +202,25 @@ export async function addAvailabilityOverride(
 ) {
   await db.professional.findFirstOrThrow({ where: { id: professionalId, tenantId } })
   const dateObj = new Date(body.date + 'T00:00:00')
+  const startTime = body.startTime
+  const endTime = body.endTime
+
+  const existing = await db.availabilityOverride.findFirst({
+    where: {
+      professionalId,
+      date: dateObj,
+      startTime,
+      endTime,
+    },
+  })
+  if (existing) return existing
+
   return db.availabilityOverride.create({
     data: {
       professionalId,
       date: dateObj,
-      startTime: body.startTime,
-      endTime: body.endTime,
+      startTime,
+      endTime,
       slotDurationMin: body.slotDurationMin ?? 50,
     },
   })
@@ -212,6 +268,16 @@ export async function addAvailabilityBlockRange(
   await db.professional.findFirstOrThrow({ where: { id: professionalId, tenantId } })
   const dateFrom = new Date(body.dateFrom + 'T00:00:00')
   const dateTo = new Date(body.dateTo + 'T00:00:00')
+
+  const existing = await db.availabilityBlockRange.findFirst({
+    where: {
+      professionalId,
+      dateFrom,
+      dateTo,
+    },
+  })
+  if (existing) return existing
+
   return db.availabilityBlockRange.create({
     data: {
       professionalId,

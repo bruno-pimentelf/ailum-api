@@ -17,6 +17,7 @@
     "db:generate": "prisma generate",
     "db:generate:prod": "tsx --env-file=.env.production.local node_modules/prisma/build/index.js generate",
     "db:seed": "tsx prisma/seed.ts",
+    "db:dedupe-availability": "tsx --env-file=.env.production.local scripts/dedupe-availability.ts",
     "test:agent": "tsx --env-file=.env.production.local scripts/test-agent-setup.ts"
   },
   "keywords": [],

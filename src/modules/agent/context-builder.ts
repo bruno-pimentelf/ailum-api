@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { decrypt } from '../../config/encryption.js'
+import { mergeAvailabilityForDay } from '../../utils/availability-merge.js'
 import type {
   AgentContext,
   AvailableProfessional,
@@ -227,14 +228,19 @@ export async function buildContext(
           .map((w: { startTime: string; endTime: string }) => ({ startTime: w.startTime, endTime: w.endTime }))
       })
 
-    const availabilitySource =
-      prof.availabilityOverrides.length > 0
-        ? prof.availabilityOverrides.map((o: { startTime: string; endTime: string; slotDurationMin: number }) => ({
-            startTime: o.startTime,
-            endTime: o.endTime,
-            slotDurationMin: o.slotDurationMin,
-          }))
-        : prof.availability
+    const weekly = prof.availability.map((a: { startTime: string; endTime: string; slotDurationMin: number }) => ({
+      startTime: a.startTime,
+      endTime: a.endTime,
+      slotDurationMin: a.slotDurationMin ?? 50,
+    }))
+    const overrideWindows = prof.availabilityOverrides.map(
+      (o: { startTime: string; endTime: string; slotDurationMin: number }) => ({
+        startTime: o.startTime,
+        endTime: o.endTime,
+        slotDurationMin: o.slotDurationMin ?? 50,
+      }),
+    )
+    const availabilitySource = mergeAvailabilityForDay(weekly, overrideWindows)
 
     if (availabilitySource.length === 0) continue
 

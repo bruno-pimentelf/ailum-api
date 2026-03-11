@@ -8,7 +8,7 @@ import {
 } from './professionals.schema.js'
 import {
   listProfessionals, getProfessionalById, createProfessional, updateProfessional, deactivateProfessional,
-  getProfessionalAvailabilitySchedule, setProfessionalAvailability,
+  getProfessionalAvailabilitySchedule, setProfessionalAvailability, clearProfessionalAvailability,
   addAvailabilityException, removeAvailabilityException,
   addAvailabilityOverride, listAvailabilityOverrides, removeAvailabilityOverride,
   addAvailabilityBlockRange, listAvailabilityBlockRanges, removeAvailabilityBlockRange,
@@ -58,6 +58,14 @@ export async function professionalsRoutes(fastify: FastifyInstance) {
     ],
     schema: { params: ProfessionalParamsSchema, body: SetAvailabilitySchema },
   }, async (req) => setProfessionalAvailability(fastify.db, req.tenantId, (req.params as { id: string }).id, req.body as never))
+
+  fastify.delete('/:id/availability', {
+    onRequest: [
+      fastify.authenticate,
+      fastify.authorizeProfessionalWrite((req) => (req.params as { id: string }).id),
+    ],
+    schema: { params: ProfessionalParamsSchema },
+  }, async (req) => clearProfessionalAvailability(fastify.db, req.tenantId, (req.params as { id: string }).id))
 
   // ── Exceptions ──────────────────────────────────────────────────────────────
   fastify.post('/:id/exceptions', {

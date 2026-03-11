@@ -1,6 +1,7 @@
 import type { PrismaClient } from '../../generated/prisma/client.js'
 import type { FastifyInstance } from 'fastify'
 import { FirebaseSyncService } from '../../services/firebase-sync.service.js'
+import { mergeAvailabilityForDay } from '../../utils/availability-merge.js'
 
 export async function listAppointments(
   db: PrismaClient,
@@ -240,14 +241,17 @@ export async function getProfessionalAvailability(
   if (fullBlockException) return { slots: [], reason: 'Profissional indisponível nesta data' }
   if (blockRanges.length > 0) return { slots: [], reason: 'Profissional indisponível nesta data' }
 
-  const availabilitySource =
-    overrides.length > 0
-      ? overrides.map((o) => ({
-          startTime: o.startTime,
-          endTime: o.endTime,
-          slotDurationMin: o.slotDurationMin,
-        }))
-      : availability
+  const weekly = availability.map((a) => ({
+    startTime: a.startTime,
+    endTime: a.endTime,
+    slotDurationMin: a.slotDurationMin ?? 50,
+  }))
+  const overrideWindows = overrides.map((o) => ({
+    startTime: o.startTime,
+    endTime: o.endTime,
+    slotDurationMin: o.slotDurationMin ?? 50,
+  }))
+  const availabilitySource = mergeAvailabilityForDay(weekly, overrideWindows)
 
   if (availabilitySource.length === 0) return { slots: [], reason: 'Sem disponibilidade neste dia da semana' }
 

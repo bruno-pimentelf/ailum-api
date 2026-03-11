@@ -1,4 +1,5 @@
 import type { PrismaClient } from '../generated/prisma/client.js'
+import { mergeAvailabilityForDay } from '../utils/availability-merge.js'
 
 export interface AvailabilitySlot {
   time: string
@@ -107,13 +108,17 @@ export async function searchAvailability(
 
     const slotMaskWindows = collectSlotMaskFromExceptions(prof.availabilityExceptions)
 
-    const availabilitySource = prof.availabilityOverrides.length > 0
-      ? prof.availabilityOverrides.map((o) => ({
-          startTime: o.startTime,
-          endTime: o.endTime,
-          slotDurationMin: o.slotDurationMin,
-        }))
-      : prof.availability
+    const weekly = prof.availability.map((a) => ({
+      startTime: a.startTime,
+      endTime: a.endTime,
+      slotDurationMin: a.slotDurationMin ?? 50,
+    }))
+    const overrides = prof.availabilityOverrides.map((o) => ({
+      startTime: o.startTime,
+      endTime: o.endTime,
+      slotDurationMin: o.slotDurationMin ?? 50,
+    }))
+    const availabilitySource = mergeAvailabilityForDay(weekly, overrides)
 
     if (availabilitySource.length === 0) continue
 
