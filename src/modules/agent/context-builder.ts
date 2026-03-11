@@ -311,13 +311,16 @@ export async function buildContext(
   const currentDateIsoExample = `${year}-${month}-${day}T09:00:00-03:00`
 
   const tomorrow = new Date(now.getTime() + 86_400_000)
+  const dayAfterTomorrow = new Date(tomorrow.getTime() + 86_400_000)
   const tomorrowDateIso = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`
+  const dayAfterTomorrowDateIso = `${dayAfterTomorrow.getFullYear()}-${String(dayAfterTomorrow.getMonth() + 1).padStart(2, '0')}-${String(dayAfterTomorrow.getDate()).padStart(2, '0')}`
 
   return {
     currentDate,
     currentTime,
     currentDateIsoExample,
     tomorrowDateIso,
+    dayAfterTomorrowDateIso,
     contact: {
       id: contact.id,
       phone: contact.phone,

@@ -355,6 +355,9 @@ export async function orchestrate(
     const createAppointmentSuccess = stageResult.toolCalls.find(
       (t) => t.name === 'create_appointment' && t.result.success && t.result.data,
     )
+    const rescheduleAppointmentSuccess = stageResult.toolCalls.find(
+      (t) => t.name === 'reschedule_appointment' && t.result.success && t.result.data,
+    )
     if (createAppointmentSuccess?.result.data) {
       const d = createAppointmentSuccess.result.data as {
         scheduledAtFormatted?: string
@@ -407,6 +410,18 @@ export async function orchestrate(
       finalReply = d.scheduledAtFormatted
         ? `Consulta agendada para ${d.scheduledAtFormatted} com ${d.professionalName ?? 'o profissional'}${d.serviceName ? ` — ${d.serviceName}` : ''} — até lá`
         : 'Consulta agendada com sucesso. Qualquer dúvida, estamos à disposição'
+    }
+
+    // Fallback: agente executou reschedule_appointment com sucesso mas não gerou texto
+    if (!finalReply?.trim() && rescheduleAppointmentSuccess?.result.data) {
+      const d = rescheduleAppointmentSuccess.result.data as {
+        scheduledAtFormatted?: string
+        professionalName?: string | null
+        serviceName?: string | null
+      }
+      finalReply = d.scheduledAtFormatted
+        ? `Pronto, remarcada. Sua consulta agora está agendada para ${d.scheduledAtFormatted} com ${d.professionalName ?? 'o profissional'}${d.serviceName ? ` (${d.serviceName})` : ''} — qualquer coisa é só chamar`
+        : 'Consulta remarcada com sucesso. Qualquer dúvida, estamos à disposição'
     }
 
     audit.push({
@@ -690,6 +705,10 @@ function summarizeToolInput(tool: string, input: Record<string, unknown>): Recor
       return { stage_id: String(input.stage_id ?? '').slice(0, 8) + '...', reason: input.reason }
     case 'notify_operator':
       return { reason: input.reason, urgency: input.urgency }
+    case 'cancel_appointment':
+      return { appointment_id: String(input.appointment_id ?? '').slice(0, 8) + '...', reason: input.reason }
+    case 'reschedule_appointment':
+      return { appointment_id: String(input.appointment_id ?? '').slice(0, 8) + '...', scheduled_at: input.scheduled_at }
     default:
       return input
   }
@@ -722,6 +741,14 @@ function summarizeToolResult(
       return `Stage alterado`
     case 'notify_operator':
       return 'Operador notificado'
+    case 'cancel_appointment': {
+      const formatted = d?.scheduledAtFormatted as string | undefined
+      return formatted ? `Cancelado: ${formatted}` : 'Consulta cancelada'
+    }
+    case 'reschedule_appointment': {
+      const formatted = d?.scheduledAtFormatted as string | undefined
+      return formatted ? `Remarcado para ${formatted}` : 'Consulta remarcada'
+    }
     default:
       return result.reason ?? null
   }
@@ -740,6 +767,12 @@ function buildConfirmationSummary(
         case 'generate_pix': {
           const d = tc.result.data
           return `Cobrança PIX de R$ ${d?.amount ?? '?'}`
+        }
+        case 'cancel_appointment':
+          return `Cancelar consulta`
+        case 'reschedule_appointment': {
+          const d = tc.result.data
+          return `Remarcar para ${d?.scheduledAtFormatted ?? '?'}`
         }
         default:
           return tc.name

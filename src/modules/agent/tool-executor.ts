@@ -4,6 +4,7 @@ import { createPixCharge as asaasCreatePixCharge } from '../../services/asaas.se
 import { ZapiService } from '../../services/zapi.service.js'
 import { STATUS_TRANSITIONS } from '../../constants/status-transitions.js'
 import { searchAvailability } from '../../services/availability.service.js'
+import { updateAppointment } from '../scheduling/scheduling.service.js'
 import type { AgentContext } from '../../types/context.js'
 
 export interface ToolResult {
@@ -49,6 +50,16 @@ interface SearchAvailabilityInput {
   date: string
 }
 
+interface CancelAppointmentInput {
+  appointment_id: string
+  reason?: string
+}
+
+interface RescheduleAppointmentInput {
+  appointment_id: string
+  scheduled_at: string
+}
+
 // ─── Executor ────────────────────────────────────────────────────────────────
 
 export interface ExecuteToolOptions {
@@ -86,6 +97,12 @@ export async function executeToolSafely(
 
       case 'notify_operator':
         return await notifyOperator(input as unknown as NotifyOperatorInput, context, db, firebaseSync, fastify)
+
+      case 'cancel_appointment':
+        return await cancelAppointment(input as unknown as CancelAppointmentInput, context, db, fastify, firebaseSync)
+
+      case 'reschedule_appointment':
+        return await rescheduleAppointment(input as unknown as RescheduleAppointmentInput, context, db, fastify, firebaseSync)
 
       case 'send_message':
         return await sendMessage(
@@ -454,6 +471,149 @@ async function moveStage(
     success: true,
     requiresConfirmation: false,
     data: { stageId: stage.id, stageName: stage.name },
+  }
+}
+
+// ─── cancel_appointment ──────────────────────────────────────────────────────
+
+async function cancelAppointment(
+  input: CancelAppointmentInput,
+  context: AgentContext,
+  db: FastifyInstance['db'],
+  fastify: FastifyInstance,
+  sync: FirebaseSyncService,
+): Promise<ToolResult> {
+  const appt = await db.appointment.findFirst({
+    where: {
+      id: input.appointment_id,
+      tenantId: context.tenant.id,
+      contactId: context.contact.id,
+    },
+    select: { id: true, status: true, scheduledAt: true, professional: { select: { fullName: true } }, service: { select: { name: true } } },
+  })
+
+  if (!appt) {
+    return { success: false, requiresConfirmation: false, reason: 'Consulta não encontrada ou não pertence a este contato.' }
+  }
+  if (appt.status !== 'PENDING' && appt.status !== 'CONFIRMED') {
+    return { success: false, requiresConfirmation: false, reason: `Consulta já está ${appt.status.toLowerCase()}, não é possível cancelar.` }
+  }
+
+  await updateAppointment(db, fastify, context.tenant.id, appt.id, {
+    status: 'CANCELLED',
+    cancelledReason: input.reason ?? 'Solicitado pelo paciente via assistente',
+  })
+
+  const newStatus = STATUS_TRANSITIONS['cancel_appointment']
+  await db.contact.update({
+    where: { id: context.contact.id },
+    data: { status: newStatus, updatedAt: new Date() },
+  })
+  await sync.updateContactPresence({
+    tenantId: context.tenant.id,
+    contactId: context.contact.id,
+    status: newStatus,
+    stageId: context.contact.currentStageId,
+    lastMessageAt: new Date(),
+  })
+
+  const scheduledAtFormatted = appt.scheduledAt.toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+  return {
+    success: true,
+    requiresConfirmation: true,
+    data: {
+      appointmentId: appt.id,
+      professionalName: appt.professional?.fullName ?? null,
+      serviceName: appt.service?.name ?? null,
+      scheduledAtFormatted,
+    },
+  }
+}
+
+// ─── reschedule_appointment ──────────────────────────────────────────────────
+
+async function rescheduleAppointment(
+  input: RescheduleAppointmentInput,
+  context: AgentContext,
+  db: FastifyInstance['db'],
+  fastify: FastifyInstance,
+  sync: FirebaseSyncService,
+): Promise<ToolResult> {
+  const scheduledAt = new Date(input.scheduled_at)
+  if (Number.isNaN(scheduledAt.getTime())) {
+    return {
+      success: false,
+      requiresConfirmation: false,
+      reason: `Data/horário inválido: "${input.scheduled_at}". Use formato ISO: YYYY-MM-DDTHH:mm:ss-03:00`,
+    }
+  }
+
+  const appt = await db.appointment.findFirst({
+    where: {
+      id: input.appointment_id,
+      tenantId: context.tenant.id,
+      contactId: context.contact.id,
+    },
+    select: { id: true, status: true, professionalId: true, serviceId: true, scheduledAt: true, durationMin: true, professional: { select: { fullName: true } }, service: { select: { name: true } } },
+  })
+
+  if (!appt) {
+    return { success: false, requiresConfirmation: false, reason: 'Consulta não encontrada ou não pertence a este contato.' }
+  }
+  if (appt.status !== 'PENDING' && appt.status !== 'CONFIRMED') {
+    return { success: false, requiresConfirmation: false, reason: `Consulta já está ${appt.status.toLowerCase()}, não é possível remarcar.` }
+  }
+
+  const conflictEnd = new Date(scheduledAt.getTime() + appt.durationMin * 60_000)
+  const conflict = await db.appointment.findFirst({
+    where: {
+      professionalId: appt.professionalId,
+      status: { in: ['PENDING', 'CONFIRMED'] },
+      id: { not: appt.id },
+      scheduledAt: { lt: conflictEnd },
+      AND: [
+        {
+          scheduledAt: {
+            gte: new Date(scheduledAt.getTime() - appt.durationMin * 60_000),
+          },
+        },
+      ],
+    },
+  })
+  if (conflict) {
+    return { success: false, requiresConfirmation: true, reason: 'Horário indisponível. Outro agendamento já ocupa esse horário.' }
+  }
+
+  await updateAppointment(db, fastify, context.tenant.id, appt.id, {
+    scheduledAt: input.scheduled_at,
+  })
+
+  const scheduledAtFormatted = scheduledAt.toLocaleString('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+  return {
+    success: true,
+    requiresConfirmation: true,
+    data: {
+      appointmentId: appt.id,
+      scheduledAt: input.scheduled_at,
+      scheduledAtFormatted,
+      professionalName: appt.professional?.fullName ?? null,
+      serviceName: appt.service?.name ?? null,
+    },
   }
 }
 

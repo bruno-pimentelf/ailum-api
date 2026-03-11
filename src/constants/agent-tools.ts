@@ -10,9 +10,9 @@ export interface AgentToolDefinition {
 export const AGENT_TOOLS = {
   search_availability: {
     name: 'search_availability',
-    description: `Busca horários disponíveis para uma data. Chamar quando o usuário indicar um dia (ex: "amanhã", "terça", "10/03", "próxima semana").
-Retorna profissionais com id, nome, serviços (id, nome, duração, preço) e slots (time, endTime).
-Quando retorna 0 profissionais, o resultado inclui "diagnostic" com: profissionais ativos, se têm disponibilidade para o dia, se têm serviços de consulta vinculados, exceções. Use esse contexto para responder ao usuário de forma útil (ex: sugerir verificar vinculação de serviços ao profissional).`,
+    description: `Busca horários disponíveis para uma data. Chamar quando: (1) o usuário indicar um dia (ex: "amanhã", "terça", "10/03"); (2) o usuário perguntar sem especificar data — "quais você tem?", "quais dias tem?", "o que tem disponível?" — use amanhã primeiro; se 0 profissionais, tente depois de amanhã.
+Retorna profissionais com id, nome, serviços (id, nome, duração, preço) e slots (time, endTime). Apresente de forma completa: data, profissional e lista de horários.
+Quando retorna 0 profissionais, o resultado inclui "diagnostic" com detalhes. NUNCA diga que não há horários sem ter chamado a tool.`,
     input_schema: Type.Object({
       date: Type.String({
         description: 'Data no formato YYYY-MM-DD (ex: 2026-03-10 para 10 de março de 2026)',
@@ -87,6 +87,35 @@ scheduled_at: combine data + slot (ex: slot "09:00" e data 2026-03-10 → "2026-
       urgency: Type.Union([Type.Literal('low'), Type.Literal('medium'), Type.Literal('high')], {
         default: 'medium',
         description: 'Nível de urgência para o operador',
+      }),
+    }),
+  },
+
+  cancel_appointment: {
+    name: 'cancel_appointment',
+    description: `Cancela uma consulta agendada do contato. Use quando o paciente pedir explicitamente para cancelar.
+Só cancela appointments PENDING ou CONFIRMED do contato. Use appointment_id de upcomingAppointments.`,
+    input_schema: Type.Object({
+      appointment_id: Type.String({
+        format: 'uuid',
+        description: 'UUID da consulta a cancelar (do contato)',
+      }),
+      reason: Type.Optional(Type.String({ description: 'Motivo informado pelo paciente' })),
+    }),
+  },
+
+  reschedule_appointment: {
+    name: 'reschedule_appointment',
+    description: `Remarca uma consulta para nova data/horário. Use quando o paciente pedir para mudar o horário.
+Precisa do appointment_id e do novo scheduled_at. Chame search_availability para ver horários livres antes de remarcar.`,
+    input_schema: Type.Object({
+      appointment_id: Type.String({
+        format: 'uuid',
+        description: 'UUID da consulta a remarcar',
+      }),
+      scheduled_at: Type.String({
+        format: 'date-time',
+        description: 'Novo horário ISO 8601 com -03:00 (ex: 2026-03-12T14:00:00-03:00)',
       }),
     }),
   },

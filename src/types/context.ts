@@ -162,6 +162,8 @@ export interface AgentContext {
   currentDateIsoExample: string
   /** Amanhã em YYYY-MM-DD para search_availability (ex: 2026-03-10) */
   tomorrowDateIso: string
+  /** Depois de amanhã em YYYY-MM-DD para search_availability */
+  dayAfterTomorrowDateIso: string
   contact: ContextContact
   tenant: ContextTenant
   stage: ContextStage | null

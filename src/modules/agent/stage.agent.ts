@@ -167,17 +167,17 @@ export async function runStageAgent(
       text: [
         `DATA E HORÁRIO ATUAIS: ${context.currentDate} às ${context.currentTime}. Slots no contexto já excluem horários passados.`,
         allowedToolNames.includes('search_availability')
-          ? `search_availability: Quando o usuário indicar um DIA (amanhã, terça, 10/03), chame search_availability com date em YYYY-MM-DD. Use os IDs retornados para create_appointment. Amanhã = ${context.tomorrowDateIso}. Se não há slots hoje, ofereça amanhã e chame a tool.`
+          ? `search_availability: (1) Quando o usuário indicar um DIA (amanhã, terça, 10/03), chame com date em YYYY-MM-DD. (2) QUANDO O USUÁRIO PERGUNTAR SEM ESPECIFICAR DATA — "quais você tem?", "quais dias tem?", "o que tem disponível?", "quando pode?" — chame IMEDIATAMENTE com amanhã (${context.tomorrowDateIso}); se retornar 0 profissionais, tente depois de amanhã (${context.dayAfterTomorrowDateIso}). NUNCA diga "não tem horários configurados" ou "agenda fechada" SEM ter chamado a tool. (3) APRESENTE A DISPONIBILIDADE DE FORMA COMPLETA: data (ex: "amanhã 12/03"), profissional, e todos os horários listados (ex: "09:00, 09:30, 10:00, 10:30, 11:00, 11:30 e 12:00"). Use o retorno da tool — dateFormatted, professionals[].fullName, professionals[].slots[].time. Amanhã = ${context.tomorrowDateIso}. IDs do retorno são usados em create_appointment.`
           : '',
         `INTENÇÃO DETECTADA: ${routing.intent} (confiança: ${routing.confidence})`,
         context.contact.name ? `NOME DO CONTATO: ${context.contact.name}` : '',
         context.upcomingAppointments.length > 0
-          ? `CONSULTAS AGENDADAS DO CONTATO (${context.upcomingAppointments.length}) — use APENAS estes dados exatos:\n${context.upcomingAppointments
+          ? `CONSULTAS AGENDADAS DO CONTATO (${context.upcomingAppointments.length}) — use APENAS estes dados exatos. Para cancel_appointment e reschedule_appointment use o id:\n${context.upcomingAppointments
               .map(
                 (a) =>
-                  `- ${a.scheduledAt.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} com ${a.professional.fullName} (${a.service.name})`,
+                  `- id=${a.id} | ${a.scheduledAt.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })} com ${a.professional.fullName} (${a.service.name})`,
               )
-              .join('\n')}\nREGRAS: Ao mencionar consultas (cumprimento, confirmação ou pergunta), use EXATAMENTE os horários acima (horário de Brasília). Se houver mais de uma, diga "consultas" no plural e mencione a quantidade ou liste. NUNCA invente horários.`
+              .join('\n')}\nREGRAS: Ao mencionar consultas, use EXATAMENTE os horários acima (horário de Brasília). Para cancelar ou remarcar, use o appointment_id da lista. NUNCA invente horários.`
           : 'O contato não tem consultas agendadas.',
         context.pendingCharge
           ? `COBRANÇA PENDENTE: R$ ${context.pendingCharge.amount} — ${context.pendingCharge.description}`
@@ -192,6 +192,13 @@ scheduled_at: ISO 8601 com -03:00. Data: ${context.currentDate} (hoje) ou data e
         allowedToolNames.includes('move_stage')
           ? 'move_stage: Avance o contato para Qualificado quando demonstrar interesse em agendar. Após create_appointment o sistema move automaticamente para Consulta Agendada.'
           : '',
+        allowedToolNames.includes('reschedule_appointment')
+          ? `REGRA reschedule_appointment: Quando INTENÇÃO = WANTS_RESCHEDULE e o contato especificou qual consulta remarcar e para quando, chame reschedule_appointment IMEDIATAMENTE com appointment_id (da lista de consultas) e scheduled_at (ISO com -03:00). NUNCA diga que remarcou sem ter chamado a tool — só envie confirmação após o resultado da tool.`
+          : '',
+        allowedToolNames.includes('cancel_appointment')
+          ? `REGRA cancel_appointment: Quando INTENÇÃO = WANTS_CANCEL e o contato especificou qual consulta cancelar, chame cancel_appointment IMEDIATAMENTE com appointment_id. NUNCA diga que cancelou sem ter chamado a tool.`
+          : '',
+        `REGRA WANTS_INFO + consultas: Quando INTENÇÃO = WANTS_INFO e o contato pedir ver/listar "minhas consultas", "meus agendamentos" ou similar, as consultas JÁ ESTÃO no bloco CONSULTAS AGENDADAS acima. Responda DIRETAMENTE listando-as (formato dia/hora + profissional + serviço). NUNCA diga "estamos verificando" — os dados estão no contexto. Se send_message estiver disponível, use-a para enviar a lista.`,
       ]
         .filter(Boolean)
         .join('\n'),
@@ -210,12 +217,13 @@ scheduled_at: ISO 8601 com -03:00. Data: ${context.currentDate} (hoje) ou data e
       }
     })
 
-  // Determine tool_choice strategy based on intent (threshold 0.7 so CONFIRMING reliably triggers create_appointment)
+  // Force tool use when intent clearly requires it (evita que o agente diga "remarcado" sem chamar a tool)
   const shouldForceToolUse =
     tools.length > 0 &&
-    routing.intent === 'CONFIRMING' &&
     routing.confidence >= 0.7 &&
-    allowedToolNames.includes('create_appointment')
+    ((routing.intent === 'CONFIRMING' && allowedToolNames.includes('create_appointment')) ||
+      (routing.intent === 'WANTS_RESCHEDULE' && allowedToolNames.includes('reschedule_appointment')) ||
+      (routing.intent === 'WANTS_CANCEL' && allowedToolNames.includes('cancel_appointment')))
 
   const toolChoice: Anthropic.MessageCreateParams['tool_choice'] =
     !tools.length

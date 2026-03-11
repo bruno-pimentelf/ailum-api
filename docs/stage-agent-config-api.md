@@ -28,7 +28,7 @@ Authorization: Bearer <session_token>
   "funnelAgentName": "Recepção",
   "funnelAgentPersonality": "Você é da recepção da clínica. Seja cordial...",
   "stageContext": "Contato inicial. Apresente a clínica...",
-  "allowedTools": ["search_availability", "create_appointment", "move_stage", "send_message", "notify_operator"],
+  "allowedTools": ["search_availability", "create_appointment", "cancel_appointment", "reschedule_appointment", "move_stage", "send_message", "notify_operator"],
   "model": "SONNET",
   "temperature": 0.4,
   "createdAt": "2026-01-01T00:00:00.000Z",
@@ -71,8 +71,10 @@ Content-Type: application/json
 | `temperature` | number 0–1 | Criatividade (0.3–0.4 recomendado) |
 
 **Tools válidas:**
-- `search_availability` — busca horários
+- `search_availability` — busca horários disponíveis
 - `create_appointment` — cria agendamento
+- `cancel_appointment` — cancela consulta do contato (PENDING/CONFIRMED)
+- `reschedule_appointment` — remarca consulta para nova data/horário
 - `generate_pix` — gera cobrança PIX
 - `move_stage` — avança contato no funil
 - `notify_operator` — transfere para humano

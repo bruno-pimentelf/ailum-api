@@ -8,6 +8,7 @@ import type { ContactStatus } from '../generated/prisma/client.js'
 export const STATUS_TRANSITIONS: Record<string, ContactStatus> = {
   // Agent tools
   create_appointment: 'APPOINTMENT_SCHEDULED',
+  cancel_appointment: 'QUALIFIED',
   generate_pix: 'AWAITING_PAYMENT',
   notify_operator: 'IN_HUMAN_SERVICE',
   qualify_lead: 'QUALIFIED',
