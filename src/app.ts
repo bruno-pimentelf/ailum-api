@@ -26,6 +26,7 @@ import { conversationsRoutes } from './modules/conversations/conversations.route
 import { authRoutes } from './modules/auth/auth.routes.js'
 import { agentRoutes } from './modules/agent/agent.routes.js'
 import { ailumAiRoutes } from './modules/ailum-ai/ailum-ai.routes.js'
+import { publicRoutes } from './modules/public/public.routes.js'
 import { tenantRoutes } from './modules/tenant/tenant.routes.js'
 import { zapiWebhookRoutes } from './modules/webhooks/zapi.webhook.js'
 import { asaasWebhookRoutes } from './modules/webhooks/asaas.webhook.js'
@@ -96,6 +97,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   // ── API v1 modules ─────────────────────────────────────────────────────────
   await fastify.register(
     async (v1) => {
+      await v1.register(publicRoutes, { prefix: '/public' })
       await v1.register(contactsRoutes, { prefix: '/contacts' })
       await v1.register(schedulingRoutes, { prefix: '/appointments' })
       await v1.register(schedulingRoutes, { prefix: '/scheduling' })
