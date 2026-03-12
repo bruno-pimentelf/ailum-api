@@ -41,6 +41,7 @@ export async function runAilumAIAvailabilityAgent(
 
   const todayIso = getTodayIsoBR()
   const tomorrowIso = getTomorrowIsoBR()
+  const nowBr = getNowFormattedBR()
 
   const contextText = buildAvailabilityContext(professional)
   const systemBlocks: TextBlockParam[] = [
@@ -56,8 +57,9 @@ REGRAS:
 - Datas em formato YYYY-MM-DD (ex: ${todayIso})
 - dayOfWeek: 0=domingo, 1=segunda, 2=terça, 3=quarta, 4=quinta, 5=sexta, 6=sábado
 - Horários em HH:mm, incrementos de 5 min (ex: 09:00, 14:30)
-- Hoje: ${todayIso}. Amanhã: ${tomorrowIso}
+- Hoje: ${todayIso}. Amanhã: ${tomorrowIso}. Horário atual (Brasília): ${nowBr}
 - Ao interpretar "amanhã", "próxima segunda", "dia 15", etc., converta para a data correta
+- Se o usuário perguntar "que horas são?", informe o horário atual: ${nowBr}
 - Confirme brevemente o que foi feito após cada alteração
 - Para cancelar ou remarcar: SEMPRE use o appointmentId retornado por list_appointments (campo id em appointmentsWithIds). NUNCA invente ou deduza o id — chame list_appointments primeiro se não tiver.
 - Se o usuário pedir algo ambíguo, pergunte para esclarecer`,
@@ -233,4 +235,17 @@ function getTomorrowIsoBR(): string {
   // Meio-dia para evitar edge cases de timezone em getDate()
   const tomorrow = new Date(y, m - 1, d + 1, 12, 0, 0)
   return `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, '0')}-${String(tomorrow.getDate()).padStart(2, '0')}`
+}
+
+function getNowFormattedBR(): string {
+  return new Date().toLocaleString('pt-BR', {
+    timeZone: TZ_BR,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    weekday: 'long',
+  })
 }
