@@ -21,6 +21,10 @@ export const PERMISSIONS = {
   FUNNELS_READ: 'funnels:read',
   FUNNELS_WRITE: 'funnels:write',
 
+  // Message Templates
+  TEMPLATES_READ: 'templates:read',
+  TEMPLATES_WRITE: 'templates:write',
+
   // Professionals
   PROFESSIONALS_READ: 'professionals:read',
   PROFESSIONALS_WRITE: 'professionals:write',
@@ -74,6 +78,8 @@ export const ROLE_PERMISSIONS: Record<MemberRole, Permission[]> = {
     PERMISSIONS.BILLING_WRITE,
     PERMISSIONS.FUNNELS_READ,
     PERMISSIONS.FUNNELS_WRITE,
+    PERMISSIONS.TEMPLATES_READ,
+    PERMISSIONS.TEMPLATES_WRITE,
     PERMISSIONS.AGENT_CONFIG_READ,
     PERMISSIONS.AGENT_CONFIG_WRITE,
     PERMISSIONS.PROFESSIONALS_READ,

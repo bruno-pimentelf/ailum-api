@@ -109,3 +109,11 @@ Apaga mensagens e memórias do contato de playground (Postgres + Firestore). Zer
 3. Firestore `tenants/{tenantId}/contacts/{contactId}` `onSnapshot` → chat em tempo real
 4. `POST confirm` quando houver confirmação pendente
 5. `GET audit?contactId=` → painel com o que a IA fez
+
+---
+
+## Templates e lembretes no playground
+
+- Lembretes (`reminder_24h`, `reminder_1h`) configurados em `/v1/templates` são enviados ao contato de playground como mensagens no chat — sem envio real via WhatsApp.
+- A mensagem aparece no Firestore e no histórico do chat.
+- Para testar lembretes: agende uma consulta confirmada para o contato playground dentro da janela (24h ou 1h) e aguarde o job rodar (a cada 30 min).

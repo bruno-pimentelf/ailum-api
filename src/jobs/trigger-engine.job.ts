@@ -5,6 +5,8 @@ import { env } from '../config/env.js'
 import { triggerQueue } from './queues.js'
 import { FirebaseSyncService } from '../services/firebase-sync.service.js'
 import { getZapiConfig, sendText } from '../services/zapi.service.js'
+import { getTemplateById } from '../modules/templates/templates.service.js'
+import { sendTemplateMessage } from '../services/template-send.service.js'
 import { createPixCharge } from '../services/asaas.service.js'
 import { decrypt } from '../config/encryption.js'
 
@@ -19,6 +21,7 @@ interface TriggerConditionConfig {
 
 interface TriggerActionConfig {
   message?: string
+  templateId?: string
   stageId?: string
   useAI?: boolean
   amount?: number
@@ -123,15 +126,54 @@ async function executeSendMessage(
   nextAppointment: { scheduledAt: Date } | null,
   fastify: FastifyInstance,
 ) {
+  const ptBrOpts = { timeZone: 'America/Sao_Paulo' as const }
+  const appointmentTimeStr = nextAppointment
+    ? nextAppointment.scheduledAt.toLocaleString('pt-BR', ptBrOpts)
+    : null
+  const context = {
+    name: contact.name ?? 'paciente',
+    appointmentTime: appointmentTimeStr,
+  }
+
+  // Prefer template by ID if provided
+  if (actionConfig.templateId) {
+    const template = await getTemplateById(fastify.db, contact.tenantId, actionConfig.templateId)
+    if (template) {
+      const fullContext = {
+        ...context,
+        appointmentDate: nextAppointment
+          ? nextAppointment.scheduledAt.toLocaleDateString('pt-BR', ptBrOpts)
+          : null,
+        appointmentTimeOnly: nextAppointment
+          ? nextAppointment.scheduledAt.toLocaleTimeString('pt-BR', {
+              ...ptBrOpts,
+              hour: '2-digit',
+              minute: '2-digit',
+            })
+          : null,
+      }
+      await sendTemplateMessage(
+        fastify.db,
+        fastify.firebase.firestore,
+        fastify.log,
+        contact.tenantId,
+        contact.id,
+        contact.phone,
+        template,
+        fullContext,
+        { source: 'trigger_engine' },
+      )
+      return
+    }
+  }
+
+  // Fallback to inline message
   const template = actionConfig.message ?? ''
   if (!template) return
 
-  const ptBrOpts = { timeZone: 'America/Sao_Paulo' as const }
   const interpolated = interpolateTemplate(template, {
-    name: contact.name ?? 'paciente',
-    appointmentTime: nextAppointment
-      ? nextAppointment.scheduledAt.toLocaleString('pt-BR', ptBrOpts)
-      : null,
+    name: context.name,
+    appointmentTime: context.appointmentTime,
   })
 
   let finalMessage = interpolated
@@ -139,7 +181,7 @@ async function executeSendMessage(
     finalMessage = await personalizeWithAI(
       interpolated,
       contact.name,
-      nextAppointment?.scheduledAt.toLocaleString('pt-BR', ptBrOpts) ?? null,
+      appointmentTimeStr,
     )
   }
 
@@ -171,7 +213,7 @@ async function executeSendMessage(
 
 async function executeMoveStage(
   actionConfig: TriggerActionConfig,
-  contact: { id: string; tenantId: string },
+  contact: { id: string; tenantId: string; status: string },
   fastify: FastifyInstance,
 ) {
   if (!actionConfig.stageId) return
@@ -195,7 +237,7 @@ async function executeMoveStage(
   await sync.updateContactPresence({
     tenantId: contact.tenantId,
     contactId: contact.id,
-    status: 'QUALIFIED',
+    status: contact.status,
     stageId: stage.id,
     lastMessageAt: null,
   })

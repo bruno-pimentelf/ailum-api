@@ -122,3 +122,11 @@ O `GET /v1/funnels` (ou `GET /v1/funnels/:id/stages`) já retorna stages com `ag
 ```
 
 Para editar apenas as tools, fazer PUT com o body contendo `allowedTools` (e demais campos se quiser manter).
+
+---
+
+## Templates em triggers
+
+Triggers com ação `SEND_MESSAGE` suportam `actionConfig.templateId` (ID do template) em vez de `actionConfig.message`. Se `templateId` for informado, o sistema usa o template (incluindo IMAGE, AUDIO, etc.). Caso contrário, usa `message` com variáveis `{{name}}`, `{{appointmentTime}}`.
+
+Ver [message-templates.md](./message-templates.md) para API e variáveis disponíveis.

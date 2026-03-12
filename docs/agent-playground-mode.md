@@ -91,3 +91,9 @@ Mensagens aparecem no Firestore em `tenants/{tenantId}/contacts/{contactId}` —
 ## Pendente (frontend)
 
 - Tela de playground que usa essas APIs e exibe o chat via Firestore.
+
+---
+
+## Templates de mensagem
+
+Templates configurados em `/v1/templates` podem ser usados em lembretes e triggers. Os lembretes (`reminder_24h`, `reminder_1h`) aparecem no chat do playground quando o contato for `__playground__` — a mensagem é salva no DB e sincronizada no Firestore, sem envio via WhatsApp.

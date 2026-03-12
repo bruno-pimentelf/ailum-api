@@ -77,6 +77,14 @@ enum MessageType {
   PIX_CHARGE
 }
 
+enum TemplateType {
+  TEXT
+  IMAGE
+  AUDIO
+  VIDEO
+  DOCUMENT
+}
+
 enum VoiceProvider {
   ELEVENLABS
   AZURE
@@ -255,6 +263,7 @@ model Tenant {
   agentMemories        AgentMemory[]
   guardrailViolations  GuardrailViolation[]
   agentJobLogs         AgentJobLog[]
+  messageTemplates     MessageTemplate[]
 
   @@map("tenants")
 }
@@ -640,6 +649,31 @@ model Message {
   @@index([contactId, createdAt])
   @@index([zapiMessageId])
   @@map("messages")
+}
+
+// ─────────────────────────────────────────────
+// MESSAGE TEMPLATES
+// ─────────────────────────────────────────────
+
+model MessageTemplate {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId    String       @db.Uuid
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  key         String
+  name        String
+  description String?
+  type        TemplateType @default(TEXT)
+  body        String
+  mediaUrl    String?
+  caption     String?
+  fileName    String?
+  variables   String[]
+  createdAt   DateTime     @default(now()) @db.Timestamptz
+  updatedAt   DateTime     @updatedAt @db.Timestamptz
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
+  @@map("message_templates")
 }
 
 // ─────────────────────────────────────────────

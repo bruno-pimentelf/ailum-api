@@ -2,10 +2,17 @@ import { Worker } from 'bullmq'
 import type { FastifyInstance } from 'fastify'
 import { env } from '../config/env.js'
 import { reminderQueue } from './queues.js'
+import { getTemplateByKey } from '../modules/templates/templates.service.js'
+import { sendTemplateMessage } from '../services/template-send.service.js'
 import { getZapiConfig, sendText } from '../services/zapi.service.js'
 import { FirebaseSyncService } from '../services/firebase-sync.service.js'
 
 type ReminderType = '24h' | '1h'
+
+const REMINDER_TEMPLATE_KEYS: Record<ReminderType, string> = {
+  '24h': 'reminder_24h',
+  '1h': 'reminder_1h',
+}
 
 // Window boundaries (minutes)
 const WINDOWS: Record<ReminderType, { minMin: number; maxMin: number }> = {
@@ -17,7 +24,7 @@ function redisKey(appointmentId: string, type: ReminderType): string {
   return `reminder_sent:${appointmentId}:${type}`
 }
 
-function buildReminderMessage(
+function buildDefaultReminderContext(
   type: ReminderType,
   contact: { name: string | null },
   appointment: {
@@ -25,7 +32,7 @@ function buildReminderMessage(
     professional: { fullName: string }
     service: { name: string }
   },
-): string {
+): { body: string } {
   const name = contact.name ?? 'paciente'
   const tz = 'America/Sao_Paulo'
   const dateStr = appointment.scheduledAt.toLocaleDateString('pt-BR', { timeZone: tz })
@@ -38,10 +45,13 @@ function buildReminderMessage(
   const service = appointment.service.name
 
   if (type === '24h') {
-    return `Olá, ${name}! Lembrando que você tem uma consulta de ${service} amanhã (${dateStr}) às ${timeStr} com ${professional}. Confirma sua presença? Responda SIM para confirmar. 😊`
+    return {
+      body: `Olá, ${name}! Lembrando que você tem uma consulta de ${service} amanhã (${dateStr}) às ${timeStr} com ${professional}. Confirma sua presença? Responda SIM para confirmar. 😊`,
+    }
   }
-
-  return `Olá, ${name}! Sua consulta de ${service} com ${professional} é HOJE às ${timeStr}. Estamos te esperando! 🏥`
+  return {
+    body: `Olá, ${name}! Sua consulta de ${service} com ${professional} é HOJE às ${timeStr}. Estamos te esperando! 🏥`,
+  }
 }
 
 export function createReminderWorker(fastify: FastifyInstance) {
@@ -75,30 +85,62 @@ export function createReminderWorker(fastify: FastifyInstance) {
         )
 
         for (const appt of appointments) {
-          const key = redisKey(appt.id, type)
-          const alreadySent = await fastify.redis.exists(key)
+          const redisKeyVal = redisKey(appt.id, type)
+          const alreadySent = await fastify.redis.exists(redisKeyVal)
           if (alreadySent) continue
 
-          const message = buildReminderMessage(type, appt.contact, appt)
-          const zapiConfig = await getZapiConfig(appt.contact.tenantId, fastify.db)
+          const tz = 'America/Sao_Paulo'
+          const ptBrOpts = { timeZone: tz } as const
+          const context = {
+            name: appt.contact.name ?? 'paciente',
+            appointmentTime: appt.scheduledAt.toLocaleString('pt-BR', ptBrOpts),
+            appointmentDate: appt.scheduledAt.toLocaleDateString('pt-BR', ptBrOpts),
+            appointmentTimeOnly: appt.scheduledAt.toLocaleTimeString('pt-BR', {
+              ...ptBrOpts,
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+            professionalName: appt.professional.fullName,
+            serviceName: appt.service.name,
+          }
 
-          if (zapiConfig) {
-            try {
-              await sendText(
-                zapiConfig.instanceId,
-                zapiConfig.clientToken,
+          const templateKey = REMINDER_TEMPLATE_KEYS[type]
+          const template = await getTemplateByKey(fastify.db, appt.contact.tenantId, templateKey)
+
+          try {
+            if (template) {
+              await sendTemplateMessage(
+                fastify.db,
+                fastify.firebase.firestore,
+                fastify.log,
+                appt.contact.tenantId,
+                appt.contact.id,
                 appt.contact.phone,
-                message,
+                template,
+                context,
+                { source: 'reminder', reminderType: type, appointmentId: appt.id },
               )
+            } else {
+              const { body } = buildDefaultReminderContext(type, appt.contact, appt)
+              const zapiConfig = await getZapiConfig(appt.contact.tenantId, fastify.db)
+              const isPlayground = appt.contact.phone === '__playground__'
 
-              // Save message to DB
+              if (zapiConfig && !isPlayground) {
+                await sendText(
+                  zapiConfig.instanceId,
+                  zapiConfig.clientToken,
+                  appt.contact.phone,
+                  body,
+                )
+              }
+
               const saved = await fastify.db.message.create({
                 data: {
                   tenantId: appt.contact.tenantId,
                   contactId: appt.contact.id,
                   role: 'AGENT',
                   type: 'TEXT',
-                  content: message,
+                  content: body,
                   metadata: { source: 'reminder', reminderType: type, appointmentId: appt.id },
                 },
               })
@@ -108,20 +150,18 @@ export function createReminderWorker(fastify: FastifyInstance) {
                 id: saved.id,
                 role: 'AGENT',
                 type: 'TEXT',
-                content: message,
+                content: body,
                 createdAt: saved.createdAt,
               })
-
-              // Mark as sent in Redis with 2h TTL to prevent duplicates
-              await fastify.redis.set(key, '1', 'EX', 2 * 3600)
-
-              fastify.log.info(
-                { appointmentId: appt.id, type, contactId: appt.contact.id },
-                'reminder-job:sent',
-              )
-            } catch (err) {
-              fastify.log.error({ err, appointmentId: appt.id }, 'reminder-job:send_error')
             }
+
+            await fastify.redis.set(redisKeyVal, '1', 'EX', 2 * 3600)
+            fastify.log.info(
+              { appointmentId: appt.id, type, contactId: appt.contact.id },
+              'reminder-job:sent',
+            )
+          } catch (err) {
+            fastify.log.error({ err, appointmentId: appt.id }, 'reminder-job:send_error')
           }
         }
       }
