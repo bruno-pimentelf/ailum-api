@@ -26,6 +26,8 @@
   "packageManager": "pnpm@10.31.0",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
+    "openai": "^4.99.0",
+    "@google/genai": "^1.0.0",
     "@better-auth/prisma-adapter": "^1.5.4",
     "@fastify/cors": "^11.2.0",
     "@fastify/helmet": "^13.0.2",

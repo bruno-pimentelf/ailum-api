@@ -1,11 +1,9 @@
-import Anthropic from '@anthropic-ai/sdk'
 import type { FastifyInstance } from 'fastify'
-import { env } from '../../config/env.js'
+import { getLLM, resolveModel } from '../../services/llm/llm.service.js'
 import type { AgentContext } from '../../types/context.js'
 import { extractJson } from './parse-json.js'
 import type { ToolCallRecord } from './stage.agent.js'
 
-const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
 
 export type GuardrailSeverity = 'low' | 'medium' | 'high'
 
@@ -66,18 +64,15 @@ RESPOSTA A VERIFICAR:
 ${reply}${toolSummary}`
 
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5',
-      max_tokens: 200,
-      temperature: 0,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userContent }],
-    })
-
-    const text = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
+    const llm = getLLM()
+    const result = await llm.chat(
+      [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userContent },
+      ],
+      { model: resolveModel('haiku'), maxTokens: 200, temperature: 0 },
+    )
+    const text = result.text
 
     const parsed = extractJson<Omit<GuardrailResult, 'safeReply'>>(text)
     if (!parsed) {

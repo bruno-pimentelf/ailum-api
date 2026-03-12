@@ -1,8 +1,6 @@
-import Anthropic from '@anthropic-ai/sdk'
-import { env } from '../../config/env.js'
+import { getLLM, resolveModel } from '../../services/llm/llm.service.js'
 import type { AgentContext } from '../../types/context.js'
 
-const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
 
 export type RouterIntent =
   | 'WANTS_SCHEDULE'
@@ -237,18 +235,15 @@ ${recentMessages || '(sem histórico)'}
 Nova mensagem do contato: "${message}"`
 
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5',
-      max_tokens: 300,
-      temperature: 0,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: userContent }],
-    })
-
-    const text = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
+    const llm = getLLM()
+    const result = await llm.chat(
+      [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: userContent },
+      ],
+      { model: resolveModel('haiku'), maxTokens: 300, temperature: 0 },
+    )
+    const text = result.text
 
     let parsed: RouterResult
     try {

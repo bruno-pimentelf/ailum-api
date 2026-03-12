@@ -1,16 +1,15 @@
 import { Worker } from 'bullmq'
-import Anthropic from '@anthropic-ai/sdk'
 import type { FastifyInstance } from 'fastify'
 import { env } from '../config/env.js'
 import { triggerQueue } from './queues.js'
 import { FirebaseSyncService } from '../services/firebase-sync.service.js'
 import { getZapiConfig, sendText } from '../services/zapi.service.js'
+import { getLLM, resolveModel } from '../services/llm/llm.service.js'
 import { getTemplateById } from '../modules/templates/templates.service.js'
 import { sendTemplateMessage } from '../services/template-send.service.js'
 import { createPixCharge } from '../services/asaas.service.js'
 import { decrypt } from '../config/encryption.js'
 
-const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
 
 // ─── Condition checkers ───────────────────────────────────────────────────────
 
@@ -105,14 +104,12 @@ Template: "${template}"
 Retorne APENAS o texto final da mensagem, sem explicações, sem aspas.`
 
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5',
-      max_tokens: 300,
-      temperature: 0.3,
-      messages: [{ role: 'user', content: prompt }],
-    })
-    const text = response.content.filter((b) => b.type === 'text').map((b) => b.text).join('')
-    return text.trim() || template
+    const llm = getLLM()
+    const result = await llm.chat(
+      [{ role: 'user', content: prompt }],
+      { model: resolveModel('haiku'), maxTokens: 300, temperature: 0.3 },
+    )
+    return result.text.trim() || template
   } catch {
     return template
   }

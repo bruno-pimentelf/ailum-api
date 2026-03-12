@@ -23,9 +23,13 @@ export function createAgentWorker(fastify: FastifyInstance) {
 
       job.log(`[agent-job] contact=${contactId} tenant=${tenantId} testMode=${testMode ?? false}`)
 
-      // Verifica se o agente está configurado (ANTHROPIC_API_KEY)
-      if (!env.ANTHROPIC_API_KEY) {
-        fastify.log.warn({ contactId, tenantId }, 'agent-job:skipped — ANTHROPIC_API_KEY not set')
+      // Verifica se o agente está configurado (API key do provider)
+      const hasApiKey =
+        (env.LLM_PROVIDER === 'openai' && !!env.OPENAI_API_KEY) ||
+        (env.LLM_PROVIDER === 'gemini' && !!env.GEMINI_API_KEY) ||
+        ((env.LLM_PROVIDER === 'anthropic' || !env.LLM_PROVIDER) && !!env.ANTHROPIC_API_KEY)
+      if (!hasApiKey) {
+        fastify.log.warn({ contactId, tenantId }, 'agent-job:skipped — LLM API key not set')
         return { status: 'skipped', reason: 'agent_not_configured' }
       }
 

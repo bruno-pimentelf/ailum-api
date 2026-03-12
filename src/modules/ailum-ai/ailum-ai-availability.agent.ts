@@ -1,13 +1,12 @@
-import Anthropic from '@anthropic-ai/sdk'
-import type { MessageParam, TextBlockParam, ToolUseBlock } from '@anthropic-ai/sdk/resources/messages.js'
-import { env } from '../../config/env.js'
+import type { TextBlockParam } from '@anthropic-ai/sdk/resources/messages.js'
 import { AILUM_AI_AVAILABILITY_TOOLS } from '../../constants/ailum-ai-availability-tools.js'
 import type { PrismaClient } from '../../generated/prisma/client.js'
+import { getLLM, resolveModel } from '../../services/llm/llm.service.js'
+import type { LLMMessage, LLMToolCall } from '../../services/llm/llm.types.js'
+import { toLLMTool } from '../../services/llm/typebox-to-json-schema.js'
 import { getProfessionalById } from '../professionals/professionals.service.js'
 import type { AvailabilityExecutorContext } from './ailum-ai-availability.executor.js'
 import { executeAvailabilityTool } from './ailum-ai-availability.executor.js'
-
-const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
 
 const MAX_TOOL_ITERATIONS = 5
 const DAY_NAMES = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'] as const
@@ -15,12 +14,23 @@ const DAY_NAMES = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 
 export interface AilumAIAvailabilityAgentResult {
   reply: string
   toolCalls: Array<{ name: string; input: Record<string, unknown>; success: boolean; message: string }>
+  /** Quando uma ação requer confirmação (cancelar/remarcar), o front pode exibir botão "Confirmar" */
+  requiresConfirmation?: boolean
+  confirmationToken?: string
+  confirmationSummary?: string
+  confirmationActionType?: 'cancel' | 'reschedule'
+}
+
+export interface AilumAIChatMessage {
+  role: 'user' | 'assistant'
+  content: string
 }
 
 export async function runAilumAIAvailabilityAgent(
   message: string,
   context: AvailabilityExecutorContext,
   fastify: { db: PrismaClient; log: { error: (o: unknown, msg?: string) => void } },
+  options?: { messages?: AilumAIChatMessage[] },
 ): Promise<AilumAIAvailabilityAgentResult> {
   const { tenantId, professionalId } = context
 
@@ -36,9 +46,11 @@ export async function runAilumAIAvailabilityAgent(
   const systemBlocks: TextBlockParam[] = [
     {
       type: 'text',
-      text: `Você é o assistente de disponibilidade do Dr(a). ${professional.fullName}.
+      text: `Você é o assistente do Dr(a). ${professional.fullName}.
 
-SUA FUNÇÃO: Interpretar mensagens em linguagem natural e executar alterações na disponibilidade usando as ferramentas disponíveis.
+SUAS FUNÇÕES:
+- Disponibilidade: alterar grade semanal, bloquear dias, exceções, etc.
+- Consultas: listar, cancelar e remarcar (cancelar e remarcar exigem confirmação do usuário).
 
 REGRAS:
 - Datas em formato YYYY-MM-DD (ex: ${todayIso})
@@ -47,6 +59,7 @@ REGRAS:
 - Hoje: ${todayIso}. Amanhã: ${tomorrowIso}
 - Ao interpretar "amanhã", "próxima segunda", "dia 15", etc., converta para a data correta
 - Confirme brevemente o que foi feito após cada alteração
+- Para cancelar ou remarcar: SEMPRE use o appointmentId retornado por list_appointments (campo id em appointmentsWithIds). NUNCA invente ou deduza o id — chame list_appointments primeiro se não tiver.
 - Se o usuário pedir algo ambíguo, pergunte para esclarecer`,
     },
     {
@@ -55,74 +68,96 @@ REGRAS:
     },
   ]
 
-  const tools: Anthropic.Tool[] = Object.values(AILUM_AI_AVAILABILITY_TOOLS).map((def) => ({
-    name: def.name,
-    description: def.description,
-    input_schema: def.input_schema as Anthropic.Tool['input_schema'],
-  }))
+  const llmTools = Object.values(AILUM_AI_AVAILABILITY_TOOLS).map((def) => toLLMTool(def))
+  const systemText = systemBlocks.map((b) => (b as { text: string }).text).join('\n\n')
 
   const toolCalls: AilumAIAvailabilityAgentResult['toolCalls'] = []
-  let currentMessages: MessageParam[] = [{ role: 'user', content: message }]
+  const history: LLMMessage[] = (options?.messages ?? []).map((m) =>
+    m.role === 'user' ? { role: 'user' as const, content: m.content } : { role: 'assistant' as const, content: m.content },
+  )
+  let currentMessages: LLMMessage[] = [...history, { role: 'user', content: message }]
   let finalReply = ''
 
+  const llm = getLLM()
+
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 1024,
-      temperature: 0.2,
-      system: systemBlocks as Anthropic.TextBlockParam[],
-      tools,
-      tool_choice: tools.length ? { type: 'auto' as const } : undefined,
-      messages: currentMessages,
-    })
-
-    const textContent = response.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-
-    if (textContent) finalReply = textContent
-
-    if (response.stop_reason !== 'tool_use') break
-
-    const toolUseBlocks = response.content.filter(
-      (b): b is ToolUseBlock => b.type === 'tool_use',
+    const result = await llm.chatWithTools(
+      [{ role: 'system', content: systemText }, ...currentMessages],
+      llmTools,
+      {
+        model: resolveModel('sonnet'),
+        maxTokens: 1024,
+        temperature: 0.2,
+        toolChoice: llmTools.length ? 'auto' : undefined,
+      },
     )
-    if (toolUseBlocks.length === 0) break
+
+    if (result.text) finalReply = result.text
+
+    if (result.stopReason !== 'tool_use' || result.toolCalls.length === 0) break
 
     currentMessages = [
       ...currentMessages,
-      { role: 'assistant', content: response.content } as MessageParam,
+      {
+        role: 'assistant',
+        content: result.text,
+        toolCalls: result.toolCalls,
+      },
     ]
 
-    const toolResultContents: Anthropic.ToolResultBlockParam[] = []
+    const toolResultContents: { toolCallId: string; content: string; name?: string }[] = []
 
-    for (const toolBlock of toolUseBlocks) {
-      const toolInput = toolBlock.input as Record<string, unknown>
-      const result = await executeAvailabilityTool(
-        toolBlock.name,
-        toolInput,
+    let earlyConfirm: { token: string; summary: string; actionType: 'cancel' | 'reschedule' } | null = null
+
+    for (const tc of result.toolCalls as LLMToolCall[]) {
+      const execResult = await executeAvailabilityTool(
+        tc.name,
+        tc.input,
         context,
         fastify as Parameters<typeof executeAvailabilityTool>[3],
       )
 
       toolCalls.push({
-        name: toolBlock.name,
-        input: toolInput,
-        success: result.success,
-        message: result.message,
+        name: tc.name,
+        input: tc.input,
+        success: execResult.success,
+        message: execResult.message,
       })
 
+      if (execResult.requiresConfirmation && execResult.data?.confirmationToken) {
+        earlyConfirm = {
+          token: execResult.data.confirmationToken as string,
+          summary: (execResult.data.summary as string) ?? 'Confirme a ação',
+          actionType: (execResult.data.actionType as 'cancel' | 'reschedule') ?? 'cancel',
+        }
+      }
+
       toolResultContents.push({
-        type: 'tool_result',
-        tool_use_id: toolBlock.id,
-        content: JSON.stringify({ success: result.success, message: result.message, ...result.data }),
+        toolCallId: tc.id,
+        name: tc.name,
+        content: JSON.stringify({
+          success: execResult.success,
+          message: execResult.message,
+          requiresConfirmation: execResult.requiresConfirmation,
+          ...execResult.data,
+        }),
       })
+    }
+
+    if (earlyConfirm) {
+      return {
+        reply: finalReply || 'Por favor, confirme a ação para continuar.',
+        toolCalls,
+        requiresConfirmation: true,
+        confirmationToken: earlyConfirm.token,
+        confirmationSummary: earlyConfirm.summary,
+        confirmationActionType: earlyConfirm.actionType,
+      }
     }
 
     currentMessages = [
       ...currentMessages,
-      { role: 'user', content: toolResultContents } as MessageParam,
+      { role: 'user', content: '', toolResults: toolResultContents },
     ]
   }
 

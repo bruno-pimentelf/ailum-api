@@ -1,16 +1,11 @@
-import Anthropic from '@anthropic-ai/sdk'
-import type {
-  MessageParam,
-  TextBlockParam,
-  ToolUseBlock,
-} from '@anthropic-ai/sdk/resources/messages.js'
-import { env } from '../../config/env.js'
+import type { TextBlockParam } from '@anthropic-ai/sdk/resources/messages.js'
 import { AGENT_TOOLS } from '../../constants/agent-tools.js'
+import { getLLM, resolveModel } from '../../services/llm/llm.service.js'
+import type { LLMMessage, LLMToolCall } from '../../services/llm/llm.types.js'
+import { toLLMTool } from '../../services/llm/typebox-to-json-schema.js'
 import type { AgentContext } from '../../types/context.js'
 import type { RouterResult } from './router.agent.js'
 import type { ToolResult } from './tool-executor.js'
-
-const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
 
 const MAX_TOOL_ITERATIONS = 5
 
@@ -52,7 +47,7 @@ export async function runStageAgent(
 ): Promise<StageAgentResult> {
   const config = context.stage?.agentConfig
   const allowedToolNames = config?.allowedTools ?? []
-  const model = config?.model === 'HAIKU' ? 'claude-haiku-4-5' : 'claude-sonnet-4-5'
+  const model = resolveModel(config?.model === 'HAIKU' ? 'haiku' : 'sonnet')
   const temperature = config?.temperature ?? 0.3
 
   // Build the layered system prompt
@@ -205,37 +200,23 @@ scheduled_at: ISO 8601 com -03:00. Data: ${context.currentDate} (hoje) ou data e
     },
   ]
 
-  // Build tools list — only allowed tools
-  const tools: Anthropic.Tool[] = allowedToolNames
+  // Build tools list
+  const llmTools = allowedToolNames
     .filter((name): name is keyof typeof AGENT_TOOLS => name in AGENT_TOOLS)
-    .map((name) => {
-      const def = AGENT_TOOLS[name]
-      return {
-        name: def.name,
-        description: def.description,
-        input_schema: def.input_schema as Anthropic.Tool['input_schema'],
-      }
-    })
+    .map((name) => toLLMTool(AGENT_TOOLS[name]))
 
-  // Force tool use when intent clearly requires it (evita que o agente diga "remarcado" sem chamar a tool)
   const shouldForceToolUse =
-    tools.length > 0 &&
+    llmTools.length > 0 &&
     routing.confidence >= 0.7 &&
     ((routing.intent === 'CONFIRMING' && allowedToolNames.includes('create_appointment')) ||
       (routing.intent === 'WANTS_RESCHEDULE' && allowedToolNames.includes('reschedule_appointment')) ||
       (routing.intent === 'WANTS_CANCEL' && allowedToolNames.includes('cancel_appointment')))
 
-  const toolChoice: Anthropic.MessageCreateParams['tool_choice'] =
-    !tools.length
-      ? undefined
-      : shouldForceToolUse
-        ? { type: 'any' }
-        : { type: 'auto' }
+  const systemText = systemBlocks.map((b) => (b as { text: string }).text).join('\n\n')
 
-  // Build conversation messages
-  const conversationMessages: MessageParam[] = [
+  const conversationMessages: LLMMessage[] = [
     ...context.messages.slice(-10).map(
-      (m): MessageParam => ({
+      (m): LLMMessage => ({
         role: m.role === 'CONTACT' ? 'user' : 'assistant',
         content: m.content,
       }),
@@ -243,89 +224,60 @@ scheduled_at: ISO 8601 com -03:00. Data: ${context.currentDate} (hoje) ou data e
     { role: 'user', content: message },
   ]
 
-  // Tool loop
   const toolCalls: ToolCallRecord[] = []
   let requiresConfirmation = false
   let totalInputTokens = 0
   let totalOutputTokens = 0
-  let currentMessages: MessageParam[] = [...conversationMessages]
+  let currentMessages: LLMMessage[] = [...conversationMessages]
   let finalReply = ''
 
+  const llm = getLLM()
+
   for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
-    // Only force tool use on the first iteration; subsequent iterations use auto
-    const iterationToolChoice = iteration === 0 ? toolChoice : (tools.length > 0 ? { type: 'auto' as const } : undefined)
+    const toolChoice = iteration === 0 && shouldForceToolUse ? 'required' : 'auto'
 
-    const response = await anthropic.messages.create({
-      model,
-      max_tokens: 1000,
-      temperature,
-      system: systemBlocks as Anthropic.TextBlockParam[],
-      tools: tools.length > 0 ? tools : undefined,
-      tool_choice: iterationToolChoice,
-      messages: currentMessages,
-    })
-
-    totalInputTokens += response.usage.input_tokens
-    totalOutputTokens += response.usage.output_tokens
-
-    // Collect text reply
-    const textContent = response.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-
-    if (textContent) {
-      finalReply = textContent
-    }
-
-    // Stop if no tool calls
-    if (response.stop_reason !== 'tool_use') {
-      break
-    }
-
-    const toolUseBlocks = response.content.filter(
-      (b): b is ToolUseBlock => b.type === 'tool_use',
+    const result = await llm.chatWithTools(
+      [{ role: 'system', content: systemText }, ...currentMessages],
+      llmTools,
+      {
+        model,
+        maxTokens: 1000,
+        temperature,
+        toolChoice: llmTools.length ? toolChoice : undefined,
+      },
     )
 
-    if (toolUseBlocks.length === 0) break
+    totalInputTokens += result.usage?.inputTokens ?? 0
+    totalOutputTokens += result.usage?.outputTokens ?? 0
 
-    // Add assistant turn to messages
+    if (result.text) finalReply = result.text
+
+    if (result.stopReason !== 'tool_use' || result.toolCalls.length === 0) break
+
     currentMessages = [
       ...currentMessages,
-      { role: 'assistant', content: response.content } as MessageParam,
+      {
+        role: 'assistant',
+        content: result.text,
+        toolCalls: result.toolCalls,
+      },
     ]
 
-    // Execute each tool
-    const toolResultContents: Anthropic.ToolResultBlockParam[] = []
+    const toolResultContents: { toolCallId: string; content: string; name?: string }[] = []
 
-    for (const toolBlock of toolUseBlocks) {
-      const toolInput = toolBlock.input as Record<string, unknown>
-      const result = await executeToolFn(toolBlock.name, toolInput)
-
-      toolCalls.push({ name: toolBlock.name, input: toolInput, result })
-
-      toolResultContents.push({
-        type: 'tool_result',
-        tool_use_id: toolBlock.id,
-        content: JSON.stringify(result),
-      })
-
-      // Stop for confirmation if needed
-      if (result.requiresConfirmation) {
-        requiresConfirmation = true
-      }
+    for (const tc of result.toolCalls as LLMToolCall[]) {
+      const res = await executeToolFn(tc.name, tc.input)
+      toolCalls.push({ name: tc.name, input: tc.input, result: res })
+      toolResultContents.push({ toolCallId: tc.id, content: JSON.stringify(res), name: tc.name })
+      if (res.requiresConfirmation) requiresConfirmation = true
     }
 
-    // Add tool results to messages
     currentMessages = [
       ...currentMessages,
-      { role: 'user', content: toolResultContents } as MessageParam,
+      { role: 'user', content: '', toolResults: toolResultContents },
     ]
 
-    // If any tool requires confirmation, stop the loop
-    if (requiresConfirmation) {
-      break
-    }
+    if (requiresConfirmation) break
   }
 
   return {

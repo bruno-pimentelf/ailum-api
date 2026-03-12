@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import {
   setProfessionalAvailability,
@@ -10,7 +11,17 @@ import {
   listAvailabilityBlockRanges,
   removeAvailabilityBlockRange,
 } from '../professionals/professionals.service.js'
+import {
+  listAppointments,
+  getAppointmentById,
+  cancelAppointment,
+  updateAppointment,
+} from '../scheduling/scheduling.service.js'
 import type { AilumAIAvailabilityToolName } from '../../constants/ailum-ai-availability-tools.js'
+
+const AILUM_AI_CONFIRMATION_TTL_SEC = 600
+const TZ_BR = 'America/Sao_Paulo'
+export const ailumAiPendingConfirmKey = (token: string) => `ailum_ai_pending:${token}`
 
 export interface AvailabilityExecutorContext {
   tenantId: string
@@ -21,6 +32,8 @@ export interface ExecutorResult {
   success: boolean
   message: string
   data?: Record<string, unknown>
+  /** Quando true, a ação requer confirmação do usuário antes de executar */
+  requiresConfirmation?: boolean
 }
 
 export async function executeAvailabilityTool(
@@ -143,6 +156,122 @@ export async function executeAvailabilityTool(
         return { success: true, message: `Override de ${formatDateBR(date)} removido.` }
       }
 
+      case 'list_appointments': {
+        const fromInput = input.from as string | undefined
+        const toInput = input.to as string | undefined
+        const { data } = await listAppointments(db, tenantId, {
+          professionalId,
+          from: fromInput,
+          to: toInput,
+          status: undefined,
+          page: 1,
+          limit: 50,
+        }, 'PROFESSIONAL', professionalId)
+        const appointmentsWithIds = data.map((a) => {
+          const dt = a.scheduledAt instanceof Date ? a.scheduledAt : new Date(a.scheduledAt)
+          const dateTimeBr = dt.toLocaleString('pt-BR', {
+            timeZone: TZ_BR,
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+          const contact = (a as { contact?: { name?: string } }).contact?.name ?? 'N/A'
+          const service = (a as { service?: { name?: string } }).service?.name ?? 'N/A'
+          return {
+            id: a.id,
+            dateTime: dateTimeBr,
+            contact,
+            service,
+            summary: `${dateTimeBr} — ${contact} — ${service}`,
+          }
+        })
+        const formatted = appointmentsWithIds.map((a) => `id=${a.id} | ${a.summary}`)
+        if (formatted.length === 0) {
+          const range = fromInput && toInput ? `${formatDateBR(fromInput)} a ${formatDateBR(toInput)}` : fromInput ? formatDateBR(fromInput) : 'período'
+          return { success: true, message: `Nenhuma consulta no ${range}.`, data: { appointments: [], appointmentsWithIds: [] } }
+        }
+        return {
+          success: true,
+          message: `Encontradas ${formatted.length} consulta(s). Para cancelar ou remarcar, use o appointmentId exato da lista.`,
+          data: { appointments: formatted, appointmentsWithIds },
+        }
+      }
+
+      case 'cancel_appointment': {
+        const appointmentId = input.appointmentId as string
+        const appt = await getAppointmentById(db, tenantId, appointmentId)
+        if (!appt || appt.professionalId !== professionalId) {
+          return { success: false, message: 'Consulta não encontrada ou não pertence ao profissional.' }
+        }
+        if (appt.status === 'CANCELLED') {
+          return { success: false, message: 'Esta consulta já está cancelada.' }
+        }
+        const contact = (appt as { contact?: { name?: string } }).contact?.name ?? ' paciente'
+        const scheduledAt = appt.scheduledAt instanceof Date ? appt.scheduledAt : new Date(appt.scheduledAt)
+        const summary = `Cancelar consulta de ${contact} em ${formatDateTimeBRTz(scheduledAt)}`
+        const token = randomUUID()
+        const state = {
+          action: 'cancel' as const,
+          tenantId,
+          professionalId,
+          appointmentId,
+          summary,
+          createdAt: Date.now(),
+        }
+        await fastify.redis.set(
+          ailumAiPendingConfirmKey(token),
+          JSON.stringify(state),
+          'EX',
+          AILUM_AI_CONFIRMATION_TTL_SEC,
+        )
+        return {
+          success: true,
+          message: 'Confirmação necessária para cancelar. Peça ao usuário que confirme.',
+          requiresConfirmation: true,
+          data: { confirmationToken: token, actionType: 'cancel', summary },
+        }
+      }
+
+      case 'reschedule_appointment': {
+        const appointmentId = input.appointmentId as string
+        const scheduledAt = input.scheduledAt as string
+        const appt = await getAppointmentById(db, tenantId, appointmentId)
+        if (!appt || appt.professionalId !== professionalId) {
+          return { success: false, message: 'Consulta não encontrada ou não pertence ao profissional.' }
+        }
+        if (appt.status === 'CANCELLED') {
+          return { success: false, message: 'Não é possível remarcar uma consulta já cancelada.' }
+        }
+        const contact = (appt as { contact?: { name?: string } }).contact?.name ?? ' paciente'
+        const oldDate = appt.scheduledAt instanceof Date ? appt.scheduledAt : new Date(appt.scheduledAt)
+        const newDate = new Date(scheduledAt)
+        const summary = `Remarcar consulta de ${contact} de ${formatDateTimeBRTz(oldDate)} para ${formatDateTimeBRTz(newDate)}`
+        const token = randomUUID()
+        const state = {
+          action: 'reschedule' as const,
+          tenantId,
+          professionalId,
+          appointmentId,
+          scheduledAt,
+          summary,
+          createdAt: Date.now(),
+        }
+        await fastify.redis.set(
+          ailumAiPendingConfirmKey(token),
+          JSON.stringify(state),
+          'EX',
+          AILUM_AI_CONFIRMATION_TTL_SEC,
+        )
+        return {
+          success: true,
+          message: 'Confirmação necessária para remarcar. Peça ao usuário que confirme.',
+          requiresConfirmation: true,
+          data: { confirmationToken: token, actionType: 'reschedule', summary },
+        }
+      }
+
       default:
         return { success: false, message: `Tool desconhecida: ${toolName}` }
     }
@@ -163,3 +292,16 @@ function formatDateBR(iso: string): string {
   const [y, m, d] = iso.split('-')
   return `${d}/${m}/${y}`
 }
+
+/** Formata data/hora em horário de Brasília (America/Sao_Paulo) */
+function formatDateTimeBRTz(d: Date): string {
+  return (d instanceof Date ? d : new Date(d)).toLocaleString('pt-BR', {
+    timeZone: TZ_BR,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+

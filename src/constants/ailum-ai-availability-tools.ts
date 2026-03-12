@@ -100,6 +100,32 @@ Ex: "toda segunda e quarta 9h às 18h" → slots com dayOfWeek (0=dom, 1=seg...6
       date: datePattern,
     }),
   },
+
+  list_appointments: {
+    name: 'list_appointments',
+    description: 'Lista consultas do profissional. Retorna appointmentsWithIds (array com id, dateTime, contact, service). Use o id EXATO ao chamar cancel_appointment ou reschedule_appointment. Filtros: from, to (YYYY-MM-DD).',
+    input_schema: Type.Object({
+      from: Type.Optional(datePattern),
+      to: Type.Optional(datePattern),
+    }),
+  },
+
+  cancel_appointment: {
+    name: 'cancel_appointment',
+    description: 'Cancela uma consulta. Requer confirmação. appointmentId deve ser o id retornado por list_appointments (NUNCA invente o id).',
+    input_schema: Type.Object({
+      appointmentId: Type.String({ format: 'uuid', description: 'UUID exato da consulta (retornado em list_appointments.appointmentsWithIds[].id)' }),
+    }),
+  },
+
+  reschedule_appointment: {
+    name: 'reschedule_appointment',
+    description: 'Remarca uma consulta para nova data/hora. Requer confirmação. appointmentId deve ser o id retornado por list_appointments (NUNCA invente o id).',
+    input_schema: Type.Object({
+      appointmentId: Type.String({ format: 'uuid', description: 'UUID exato da consulta (retornado em list_appointments.appointmentsWithIds[].id)' }),
+      scheduledAt: Type.String({ format: 'date-time', description: 'Nova data/hora ISO 8601 (ex: 2025-03-18T15:00:00.000-03:00)' }),
+    }),
+  },
 } as const satisfies Record<string, AilumAIAvailabilityTool>
 
 export type AilumAIAvailabilityToolName = keyof typeof AILUM_AI_AVAILABILITY_TOOLS

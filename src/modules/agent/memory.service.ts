@@ -1,10 +1,8 @@
-import Anthropic from '@anthropic-ai/sdk'
 import type { FastifyInstance } from 'fastify'
-import { env } from '../../config/env.js'
+import { getLLM, resolveModel } from '../../services/llm/llm.service.js'
 import type { ContextMessage } from '../../types/context.js'
 import { extractJson } from './parse-json.js'
 
-const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
 
 interface MemoryFact {
   key: string
@@ -54,24 +52,15 @@ export async function consolidateMemories(
     .join('\n')
 
   try {
-    const response = await anthropic.messages.create({
-      model: 'claude-haiku-4-5',
-      max_tokens: 400,
-      temperature: 0,
-      system: SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: `Conversa a analisar:\n\n${conversationText}`,
-        },
+    const llm = getLLM()
+    const result = await llm.chat(
+      [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: `Conversa a analisar:\n\n${conversationText}` },
       ],
-    })
-
-    const text = response.content
-      .filter((b) => b.type === 'text')
-      .map((b) => b.text)
-      .join('')
-      .trim()
+      { model: resolveModel('haiku'), maxTokens: 400, temperature: 0 },
+    )
+    const text = result.text.trim()
 
     const facts = extractJson<MemoryFact[]>(text)
     if (!facts || !Array.isArray(facts)) {
