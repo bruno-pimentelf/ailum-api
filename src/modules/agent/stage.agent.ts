@@ -193,6 +193,9 @@ scheduled_at: ISO 8601 com -03:00. Data: ${context.currentDate} (hoje) ou data e
         allowedToolNames.includes('cancel_appointment')
           ? `REGRA cancel_appointment: Quando INTENÇÃO = WANTS_CANCEL e o contato especificou qual consulta cancelar, chame cancel_appointment IMEDIATAMENTE com appointment_id. NUNCA diga que cancelou sem ter chamado a tool.`
           : '',
+        config?.requirePaymentBeforeConfirm && allowedToolNames.includes('create_appointment') && allowedToolNames.includes('generate_pix')
+          ? `REGRA PIX OBRIGATÓRIO: Este stage exige pagamento PIX antes de confirmar. Após create_appointment, chame generate_pix IMEDIATAMENTE com appointment_id (retornado por create_appointment) e valor do serviço (use o price do serviço escolhido em availableServices ou professional.services). A consulta só é confirmada após o pagamento.`
+          : '',
         `REGRA WANTS_INFO + consultas: Quando INTENÇÃO = WANTS_INFO e o contato pedir ver/listar "minhas consultas", "meus agendamentos" ou similar, as consultas JÁ ESTÃO no bloco CONSULTAS AGENDADAS acima. Responda DIRETAMENTE listando-as (formato dia/hora + profissional + serviço). NUNCA diga "estamos verificando" — os dados estão no contexto. Se send_message estiver disponível, use-a para enviar a lista.`,
       ]
         .filter(Boolean)

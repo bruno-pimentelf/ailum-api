@@ -135,6 +135,8 @@ interface ZapiReceivedPayload {
   referenceMessageId?: string
   messageExpirationSeconds?: number
   connectedPhone?: string
+  chatLid?: string | null
+  senderLid?: string | null
 
   text?: ZapiTextContent
   image?: ZapiImageContent
@@ -403,12 +405,20 @@ async function findTenantByInstance(fastify: FastifyInstance, instanceId: string
 
 // ── 1. ReceivedCallback — mensagem recebida pelo WhatsApp ───────────────────
 
+function isLid(phone: string): boolean {
+  return phone.endsWith('@lid')
+}
+
+function isRealPhone(phone: string): boolean {
+  return /^\d{10,15}$/.test(phone) && !phone.includes('@')
+}
+
 async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPayload) {
   // Grupos e newsletters nunca são processados
   if (payload.isGroup || payload.isNewsletter) return
   if (payload.waitingMessage) return
 
-  const phone = payload.phone ?? payload.participantPhone
+  let phone = payload.phone ?? payload.participantPhone
   const zapiMessageId = payload.messageId
   const instanceId = payload.instanceId
 
@@ -421,6 +431,12 @@ async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPay
   if (SYSTEM_PHONES.includes(phone)) {
     fastify.log.debug({ phone }, 'zapi:received:system_phone_skipped')
     return
+  }
+
+  // Quando phone é @lid: preferir contact.phones com número real se disponível (evita criar contato duplicado com LID)
+  if (isLid(phone)) {
+    const realPhone = payload.contact?.phones?.find((p) => isRealPhone(p))
+    if (realPhone) phone = realPhone
   }
 
   const extracted = extractContent(payload)
@@ -454,10 +470,98 @@ async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPay
   // senderPhoto vem no payload — URL temporária do WhatsApp (expira em 48h)
   const senderPhoto = !payload.fromMe ? (payload.senderPhoto ?? null) : null
 
+  // Quando fromMe e phone ainda é @lid: não criar novo contato — buscar por zapiChatLid ou última mensagem enviada
+  if (payload.fromMe && isLid(phone)) {
+    const chatLid = payload.chatLid ?? phone
+    const existingByLid = await fastify.db.contact.findFirst({
+      where: { tenantId, zapiChatLid: chatLid },
+      select: { id: true, phone: true, name: true, status: true, photoUrl: true },
+    })
+    if (existingByLid) {
+      const contact = existingByLid
+      const extracted = extractContent(payload)
+      if (!extracted) return
+      const { content, type, metadata } = extracted
+      const role = 'OPERATOR'
+      const savedMessage = await fastify.db.message.create({
+        data: {
+          tenantId,
+          contactId: contact.id,
+          role,
+          type,
+          content,
+          metadata: metadata ? (metadata as object) : undefined,
+          zapiMessageId,
+          sessionId: payload.zapiConversationId,
+        },
+      })
+      await fastify.db.contact.update({
+        where: { id: contact.id },
+        data: { lastMessageAt: new Date(), updatedAt: new Date() },
+      })
+      const sync = new FirebaseSyncService(fastify.firebase.firestore, fastify.log)
+      await sync.syncConversationMessage(
+        tenantId,
+        contact.id,
+        { id: savedMessage.id, role, type, content, createdAt: savedMessage.createdAt, metadata: metadata ?? undefined },
+        { name: contact.name, phone: contact.phone, status: contact.status, photoUrl: contact.photoUrl ?? undefined },
+      )
+      return
+    }
+    const lastOutgoing = await fastify.db.message.findFirst({
+      where: { tenantId, role: { in: ['OPERATOR', 'AGENT'] } },
+      orderBy: { createdAt: 'desc' },
+      select: { contactId: true },
+    })
+    if (lastOutgoing) {
+      const contact = await fastify.db.contact.findUnique({
+        where: { id: lastOutgoing.contactId },
+        select: { id: true, phone: true, name: true, status: true, photoUrl: true },
+      })
+      if (contact) {
+        const extracted = extractContent(payload)
+        if (extracted) {
+          const { content, type, metadata } = extracted
+          const role = 'OPERATOR'
+          const savedMessage = await fastify.db.message.create({
+            data: {
+              tenantId,
+              contactId: contact.id,
+              role,
+              type,
+              content,
+              metadata: metadata ? (metadata as object) : undefined,
+              zapiMessageId,
+              sessionId: payload.zapiConversationId,
+            },
+          })
+          await fastify.db.contact.update({
+            where: { id: contact.id },
+            data: { lastMessageAt: new Date(), zapiChatLid: chatLid, updatedAt: new Date() },
+          })
+          const sync = new FirebaseSyncService(fastify.firebase.firestore, fastify.log)
+          await sync.syncConversationMessage(
+            tenantId,
+            contact.id,
+            { id: savedMessage.id, role, type, content, createdAt: savedMessage.createdAt, metadata: metadata ?? undefined },
+            { name: contact.name, phone: contact.phone, status: contact.status, photoUrl: contact.photoUrl ?? undefined },
+          )
+        }
+        return
+      }
+    }
+    fastify.log.debug({ phone, chatLid }, 'zapi:received:fromMe_lid_skip_no_contact')
+    return
+  }
+
+  const chatLidToStore =
+    payload.chatLid ?? (isLid(phone) ? phone : null) ?? (payload.senderLid ?? null)
+
   const contact = await fastify.db.contact.upsert({
     where: { tenantId_phone: { tenantId, phone } },
     update: {
       ...(contactName && !payload.fromMe && { name: contactName }),
+      ...(chatLidToStore && { zapiChatLid: chatLidToStore }),
       lastMessageAt: new Date(),
       updatedAt: new Date(),
     },
@@ -466,6 +570,7 @@ async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPay
       phone,
       name: contactName,
       photoUrl: senderPhoto,
+      zapiChatLid: chatLidToStore,
       status: 'NEW_LEAD',
       lastMessageAt: new Date(),
     },

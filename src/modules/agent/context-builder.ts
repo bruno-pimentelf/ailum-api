@@ -355,6 +355,7 @@ export async function buildContext(
                 funnelAgentPersonality: stage.agentConfig.funnelAgentPersonality,
                 stageContext: stage.agentConfig.stageContext,
                 allowedTools: stage.agentConfig.allowedTools,
+                requirePaymentBeforeConfirm: stage.agentConfig.requirePaymentBeforeConfirm ?? false,
                 model: stage.agentConfig.model,
                 temperature: stage.agentConfig.temperature,
               }

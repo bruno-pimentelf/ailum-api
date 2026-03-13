@@ -40,6 +40,7 @@ export const UpsertAgentConfigSchema = Type.Object({
   funnelAgentPersonality: Type.Optional(Type.String()),
   stageContext: Type.Optional(Type.String()),
   allowedTools: Type.Optional(Type.Array(Type.String())),
+  requirePaymentBeforeConfirm: Type.Optional(Type.Boolean()),
   model: Type.Optional(Type.Union([Type.Literal('HAIKU'), Type.Literal('SONNET')])),
   temperature: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
 })

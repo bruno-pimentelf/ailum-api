@@ -486,11 +486,12 @@ model StageAgentConfig {
   funnelAgentName         String     @default("Assistente")
   funnelAgentPersonality  String?
   stageContext            String?
-  allowedTools            String[]
-  model                   AgentModel @default(SONNET)
-  temperature             Float      @default(0.3)
-  createdAt               DateTime   @default(now()) @db.Timestamptz
-  updatedAt               DateTime   @updatedAt @db.Timestamptz
+  allowedTools                 String[]
+  requirePaymentBeforeConfirm  Boolean  @default(false)
+  model                        AgentModel @default(SONNET)
+  temperature                  Float      @default(0.3)
+  createdAt                    DateTime   @default(now()) @db.Timestamptz
+  updatedAt                    DateTime   @updatedAt @db.Timestamptz
 
   @@map("stage_agent_configs")
 }
@@ -546,6 +547,7 @@ model Contact {
   assignedProfessional  Professional? @relation(fields: [assignedProfessionalId], references: [id])
   photoUrl              String?
   zapiSessionId         String?
+  zapiChatLid           String?       /// LID do chat (ex: 89563053731844@lid) — permite resolver webhooks when phone vem como @lid
   metadata              Json?
   isActive              Boolean       @default(true)
   createdAt             DateTime      @default(now()) @db.Timestamptz
@@ -563,6 +565,7 @@ model Contact {
   @@index([tenantId, status])
   @@index([tenantId, currentStageId])
   @@index([tenantId, phone])
+  @@index([tenantId, zapiChatLid])
   @@map("contacts")
 }
 

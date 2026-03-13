@@ -277,6 +277,7 @@ export async function upsertStageAgentConfig(
     funnelAgentPersonality?: string
     stageContext?: string
     allowedTools?: string[]
+    requirePaymentBeforeConfirm?: boolean
     model?: 'HAIKU' | 'SONNET'
     temperature?: number
   },
@@ -290,6 +291,7 @@ export async function upsertStageAgentConfig(
       funnelAgentPersonality: body.funnelAgentPersonality,
       stageContext: body.stageContext,
       allowedTools: body.allowedTools ?? [],
+      requirePaymentBeforeConfirm: body.requirePaymentBeforeConfirm ?? false,
       model: body.model ?? 'SONNET',
       temperature: body.temperature ?? 0.3,
     },
@@ -298,6 +300,9 @@ export async function upsertStageAgentConfig(
       ...(body.funnelAgentPersonality !== undefined && { funnelAgentPersonality: body.funnelAgentPersonality }),
       ...(body.stageContext !== undefined && { stageContext: body.stageContext }),
       ...(body.allowedTools !== undefined && { allowedTools: body.allowedTools }),
+      ...(body.requirePaymentBeforeConfirm !== undefined && {
+        requirePaymentBeforeConfirm: body.requirePaymentBeforeConfirm,
+      }),
       ...(body.model !== undefined && { model: body.model }),
       ...(body.temperature !== undefined && { temperature: body.temperature }),
     },

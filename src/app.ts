@@ -29,6 +29,7 @@ import { agentRoutes } from './modules/agent/agent.routes.js'
 import { ailumAiRoutes } from './modules/ailum-ai/ailum-ai.routes.js'
 import { publicRoutes } from './modules/public/public.routes.js'
 import { tenantRoutes } from './modules/tenant/tenant.routes.js'
+import { statsRoutes } from './modules/stats/stats.routes.js'
 import { zapiWebhookRoutes } from './modules/webhooks/zapi.webhook.js'
 import { asaasWebhookRoutes } from './modules/webhooks/asaas.webhook.js'
 
@@ -113,6 +114,7 @@ export async function buildApp(): Promise<FastifyInstance> {
       await v1.register(templatesRoutes, { prefix: '/templates' })
       await v1.register(authRoutes, { prefix: '/auth' })
       await v1.register(tenantRoutes, { prefix: '/tenant' })
+      await v1.register(statsRoutes, { prefix: '/stats' })
       await v1.register(
         async (scope) => {
           await scope.register(rateLimit, { max: 20, timeWindow: '1 minute' })

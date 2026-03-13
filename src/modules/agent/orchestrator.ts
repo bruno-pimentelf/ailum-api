@@ -14,6 +14,7 @@ import {
   computeDelayBetweenChunks,
   sleep,
 } from './humanize-message.js'
+import type { AgentContext } from '../../types/context.js'
 
 // ─── Result types ─────────────────────────────────────────────────────────────
 
@@ -273,11 +274,12 @@ export async function orchestrate(
       audit.push({ label: 'Resultado', detail: 'Aguardando confirmação do usuário' })
 
       const finalText = replyToSend ? stripTrailingPeriod(replyToSend) : (stageResult.reply ? stripTrailingPeriod(stageResult.reply) : null)
-      if (finalText) {
-        const chunks = splitIntoChunks(finalText)
-        const zapi = !testMode && context.zapiIntegration?.isActive && context.zapiIntegration.instanceId
+      const zapiConfirmation =
+        !testMode && context.zapiIntegration?.isActive && context.zapiIntegration.instanceId
           ? new ZapiService()
           : null
+      if (finalText) {
+        const chunks = splitIntoChunks(finalText)
         for (let i = 0; i < chunks.length; i++) {
           const chunk = chunks[i]!
           const savedMessage = await fastify.db.message.create({
@@ -299,19 +301,28 @@ export async function orchestrate(
             content: chunk,
             createdAt: savedMessage.createdAt,
           })
-          if (zapi && context.zapiIntegration) {
-            await zapi.sendText({
+          if (zapiConfirmation && context.zapiIntegration) {
+            const sendRes = await zapiConfirmation.sendText({
               instanceId: context.zapiIntegration.instanceId!,
               apiKey: context.zapiIntegration.apiKey,
               phone: context.contact.phone,
               message: chunk,
             })
+            const zapiMsgId = sendRes?.messageId ?? sendRes?.zapiId
+            if (zapiMsgId) {
+              await fastify.db.message.update({
+                where: { id: savedMessage.id },
+                data: { zapiMessageId: zapiMsgId },
+              })
+            }
           }
           if (i < chunks.length - 1) {
             await sleep(computeDelayBetweenChunks(chunk.trim().split(/\s+/).filter(Boolean).length))
           }
         }
       }
+
+      await sendPixToWhatsAppIfGenerated(stageResult, context, zapiConfirmation, fastify, sync, tenantId, contactId, testMode)
 
       await setAgentTyping(false, contactId, tenantId, fastify)
       await writeAudit('CONFIRMATION_REQUIRED', null, {
@@ -479,12 +490,19 @@ export async function orchestrate(
       })
 
       if (zapi && context.zapiIntegration) {
-        await zapi.sendText({
+        const sendRes = await zapi.sendText({
           instanceId: context.zapiIntegration.instanceId!,
           apiKey: context.zapiIntegration.apiKey,
           phone: context.contact.phone,
           message: chunk,
         })
+        const zapiMsgId = sendRes?.messageId ?? sendRes?.zapiId
+        if (zapiMsgId) {
+          await fastify.db.message.update({
+            where: { id: savedMessage.id },
+            data: { zapiMessageId: zapiMsgId },
+          })
+        }
       }
 
       if (i < chunks.length - 1) {
@@ -492,6 +510,8 @@ export async function orchestrate(
         await sleep(computeDelayBetweenChunks(wordCount))
       }
     }
+
+    await sendPixToWhatsAppIfGenerated(stageResult, context, zapi, fastify, sync, tenantId, contactId, testMode)
 
     await fastify.db.contact.update({
       where: { id: contactId },
@@ -654,12 +674,19 @@ export async function confirmAndExecute(
       })
 
       if (zapi && context.zapiIntegration) {
-        await zapi.sendText({
+        const sendRes = await zapi.sendText({
           instanceId: context.zapiIntegration.instanceId!,
           apiKey: context.zapiIntegration.apiKey,
           phone: context.contact.phone,
           message: chunk,
         })
+        const zapiMsgId = sendRes?.messageId ?? sendRes?.zapiId
+        if (zapiMsgId) {
+          await fastify.db.message.update({
+            where: { id: savedMessage.id },
+            data: { zapiMessageId: zapiMsgId },
+          })
+        }
       }
 
       if (i < chunks.length - 1) {
@@ -779,4 +806,78 @@ function buildConfirmationSummary(
       }
     })
     .join(' + ')
+}
+
+async function sendPixToWhatsAppIfGenerated(
+  stageResult: { toolCalls: Array<{ name: string; result: { success: boolean; data?: Record<string, unknown> } }> },
+  context: AgentContext,
+  zapi: ZapiService | null,
+  fastify: FastifyInstance,
+  sync: FirebaseSyncService,
+  tenantId: string,
+  contactId: string,
+  testMode: boolean,
+): Promise<void> {
+  const pixTool = stageResult.toolCalls.find(
+    (t) => t.name === 'generate_pix' && t.result.success && t.result.data?.qrCodeUrl && t.result.data?.pixCopyPaste,
+  )
+  if (!pixTool?.result.data) return
+  const { qrCodeUrl, pixCopyPaste, amount, description } = pixTool.result.data
+
+  if (testMode) {
+    const content = `PIX R$ ${amount ?? '?'}${description ? ` — ${description}` : ''}`
+    const savedMessage = await fastify.db.message.create({
+      data: {
+        tenantId,
+        contactId,
+        role: 'AGENT',
+        type: 'PIX_CHARGE',
+        content,
+        metadata: {
+          qrCodeUrl: qrCodeUrl as string,
+          pixCopyPaste: pixCopyPaste as string,
+          amount: String(amount ?? ''),
+          description: String(description ?? ''),
+        },
+      },
+    })
+    await sync.syncConversationMessage(tenantId, contactId, {
+      id: savedMessage.id,
+      role: 'AGENT',
+      type: 'PIX_CHARGE',
+      content,
+      metadata: savedMessage.metadata as Record<string, unknown>,
+      createdAt: savedMessage.createdAt,
+    })
+    return
+  }
+
+  if (!zapi || !context.zapiIntegration?.instanceId || !context.zapiIntegration.apiKey) return
+  try {
+    const introMsg = 'Segue o PIX para pagamento. Escaneie o QR code ou copie o código abaixo:'
+    await zapi.sendText({
+      instanceId: context.zapiIntegration.instanceId,
+      apiKey: context.zapiIntegration.apiKey,
+      phone: context.contact.phone,
+      message: introMsg,
+    })
+    await sleep(500)
+    await zapi.sendMedia({
+      instanceId: context.zapiIntegration.instanceId,
+      apiKey: context.zapiIntegration.apiKey,
+      phone: context.contact.phone,
+      message: '',
+      mediaUrl: qrCodeUrl as string,
+      type: 'image',
+    })
+    await sleep(300)
+    await zapi.sendText({
+      instanceId: context.zapiIntegration.instanceId,
+      apiKey: context.zapiIntegration.apiKey,
+      phone: context.contact.phone,
+      message: `Código PIX (copiar e colar):\n${pixCopyPaste as string}`,
+    })
+  } catch (err) {
+    fastify.log.error({ err, contactId, tenantId }, 'orchestrator:sendPixToWhatsApp:error')
+  }
 }

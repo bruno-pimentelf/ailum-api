@@ -66,6 +66,7 @@ export interface ContextStageAgentConfig {
   funnelAgentPersonality: string | null
   stageContext: string | null
   allowedTools: string[]
+  requirePaymentBeforeConfirm: boolean
   model: string
   temperature: number
 }
