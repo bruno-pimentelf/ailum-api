@@ -20,7 +20,12 @@ EXEMPLOS DE CHAVES VÁLIDAS:
 - insurance: plano de saúde
 - cancelled_once: se já cancelou consulta (true/false)
 - price_sensitive: se demonstrou sensibilidade a preço
-- preferred_professional: profissional preferido
+- preferred_professional: nome do profissional preferido (ex: Dr. Bruno, Dermatologista)
+- preferred_weekday: dia da semana preferido (ex: segunda, segunda-feira)
+- preferred_time_of_day: turno preferido (manhã, tarde, qualquer)
+- wants_slot_on_cancellation: true se pediu para ser avisado quando abrir vaga (ex: "se alguém cancelar me coloca", "me avisa se abrir vaga")
+- flexible_schedule: se aceita horários alternativos (true/false)
+- preferred_service: serviço preferido quando há vários
 - has_children: se tem filhos
 - chronic_condition: condição crônica mencionada (nunca diagnóstico — apenas o que o paciente disse)
 - location: bairro ou cidade

@@ -226,6 +226,7 @@ model Tenant {
   slug             String   @unique
   plan                      String   @default("starter")
   isAgentEnabledForWhatsApp Boolean  @default(false)
+  isSlotRecallEnabled       Boolean  @default(false)
   agentBasePrompt           String?
   guardrailRules   String?
   maxPixAmount     Decimal  @default(5000) @db.Decimal(10, 2)

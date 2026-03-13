@@ -3,6 +3,7 @@ import { Type } from '@sinclair/typebox'
 export const UpdateTenantSchema = Type.Object({
   name: Type.Optional(Type.String({ minLength: 1 })),
   isAgentEnabledForWhatsApp: Type.Optional(Type.Boolean()),
+  isSlotRecallEnabled: Type.Optional(Type.Boolean()),
   agentBasePrompt: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   guardrailRules: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   description: Type.Optional(Type.String()),

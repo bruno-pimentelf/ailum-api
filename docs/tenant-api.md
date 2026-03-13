@@ -16,6 +16,7 @@ Qualquer membro autenticado.
   "slug": "clinica-harmonia",
   "plan": "starter",
   "isAgentEnabledForWhatsApp": false,
+  "isSlotRecallEnabled": false,
   "logoUrl": null,
   "description": null,
   "phone": null,
@@ -43,6 +44,7 @@ Requer **ADMIN**. Todos os campos são opcionais.
 {
   "name": "Clínica Harmonia",
   "isAgentEnabledForWhatsApp": true,
+  "isSlotRecallEnabled": true,
   "description": "Clínica especializada em saúde integrativa.",
   "phone": "(11) 3456-7890",
   "email": "contato@clinica.com",

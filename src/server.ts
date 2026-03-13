@@ -6,6 +6,7 @@ import { createTriggerWorker, scheduleTriggerScan } from './jobs/trigger-engine.
 import { createReminderWorker, scheduleReminderScan } from './jobs/reminder.job.js'
 import { createPixExpireWorker, schedulePixExpireScan } from './jobs/pix-expire.job.js'
 import { createMemoryConsolidationWorker } from './jobs/memory-consolidation.job.js'
+import { createSlotRecallWorker } from './jobs/slot-recall.job.js'
 import { createPhotoSyncWorker } from './jobs/photo-sync.job.js'
 import type { Worker } from 'bullmq'
 
@@ -34,6 +35,7 @@ async function start() {
     createReminderWorker(app),
     createPixExpireWorker(app),
     createMemoryConsolidationWorker(app),
+    createSlotRecallWorker(app),
     createPhotoSyncWorker(app),
   ]
 

@@ -46,6 +46,12 @@ export const memoryQueue = new Queue('memory-consolidation', {
   },
 })
 
+/** Notifies contacts with wants_slot_on_cancellation when a slot opens up */
+export const slotRecallQueue = new Queue('slot-recall', {
+  connection,
+  defaultJobOptions: { ...defaultJobOptions, attempts: 2 },
+})
+
 /** Downloads contact profile photos from Z-API and uploads to Firebase Storage */
 export const photoSyncQueue = new Queue('photo-sync', {
   connection,
@@ -57,4 +63,4 @@ export const photoSyncQueue = new Queue('photo-sync', {
   },
 })
 
-export const allQueues = [agentQueue, triggerQueue, reminderQueue, pixExpireQueue, memoryQueue, photoSyncQueue]
+export const allQueues = [agentQueue, triggerQueue, reminderQueue, pixExpireQueue, memoryQueue, slotRecallQueue, photoSyncQueue]

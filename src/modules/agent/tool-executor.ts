@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { FirebaseSyncService } from '../../services/firebase-sync.service.js'
 import { createPixCharge as asaasCreatePixCharge } from '../../services/asaas.service.js'
 import { ZapiService } from '../../services/zapi.service.js'
+import { slotRecallQueue } from '../../jobs/queues.js'
 import { STATUS_TRANSITIONS } from '../../constants/status-transitions.js'
 import { searchAvailability } from '../../services/availability.service.js'
 import { updateAppointment } from '../scheduling/scheduling.service.js'
@@ -579,7 +580,14 @@ async function cancelAppointment(
       tenantId: context.tenant.id,
       contactId: context.contact.id,
     },
-    select: { id: true, status: true, scheduledAt: true, professional: { select: { fullName: true } }, service: { select: { name: true } } },
+    select: {
+      id: true,
+      status: true,
+      scheduledAt: true,
+      professionalId: true,
+      professional: { select: { fullName: true } },
+      service: { select: { name: true } },
+    },
   })
 
   if (!appt) {
@@ -606,6 +614,17 @@ async function cancelAppointment(
     stageId: context.contact.currentStageId,
     lastMessageAt: new Date(),
   })
+
+  if (context.tenant.isSlotRecallEnabled) {
+    slotRecallQueue.add('process', {
+    tenantId: context.tenant.id,
+    professionalId: appt.professionalId,
+    professionalName: appt.professional?.fullName ?? 'profissional',
+    scheduledAt: appt.scheduledAt.toISOString(),
+    serviceName: appt.service?.name ?? 'consulta',
+    excludeContactId: context.contact.id,
+  }).catch((err) => fastify.log.warn({ err }, 'slot-recall:enqueue_error'))
+  }
 
   const scheduledAtFormatted = appt.scheduledAt.toLocaleString('pt-BR', {
     timeZone: 'America/Sao_Paulo',

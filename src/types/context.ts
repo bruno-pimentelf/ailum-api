@@ -137,6 +137,7 @@ export interface ContextTenant {
   agentBasePrompt: string | null
   guardrailRules: string | null
   maxPixAmount: unknown
+  isSlotRecallEnabled: boolean
 }
 
 export interface ContextAsaasIntegration {

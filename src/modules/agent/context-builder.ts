@@ -115,6 +115,7 @@ export async function buildContext(
         agentBasePrompt: true,
         guardrailRules: true,
         maxPixAmount: true,
+        isSlotRecallEnabled: true,
       },
     }),
 
@@ -341,6 +342,7 @@ export async function buildContext(
       agentBasePrompt: tenant.agentBasePrompt,
       guardrailRules: tenant.guardrailRules,
       maxPixAmount: tenant.maxPixAmount,
+      isSlotRecallEnabled: tenant.isSlotRecallEnabled,
     },
     stage: stage
       ? {
