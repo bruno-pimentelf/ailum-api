@@ -228,6 +228,114 @@ Content-Type: application/json
 
 ---
 
+### 6. Links de pagamento
+
+#### Listar links
+
+```http
+GET /v1/integrations/asaas/payment-links?offset=0&limit=20&active=true&name=Consulta&externalReference=uuid
+```
+
+| Query              | Tipo    | Descrição                    |
+|--------------------|---------|------------------------------|
+| `offset`           | number  | Paginação                    |
+| `limit`            | number  | Itens por página             |
+| `active`           | boolean | Filtro por ativo/inativo     |
+| `name`             | string  | Filtro por nome              |
+| `externalReference`| string  | ID no Ailum para tracking    |
+
+**Resposta:** Lista com `id`, `name`, `url`, `value`, `chargeType`, `billingType`, `viewCount`, `active`, etc.
+
+#### Criar link
+
+```http
+POST /v1/integrations/asaas/payment-links
+Content-Type: application/json
+
+{
+  "name": "Consulta avulsa",
+  "description": "Pagamento de consulta",
+  "value": 200,
+  "billingType": "UNDEFINED",
+  "chargeType": "DETACHED",
+  "dueDateLimitDays": 5,
+  "externalReference": "link-consulta-uuid"
+}
+```
+
+| Campo                 | Obrigatório | Descrição                                                                 |
+|-----------------------|-------------|---------------------------------------------------------------------------|
+| `name`                | Sim         | Nome do link                                                              |
+| `billingType`         | Sim         | `UNDEFINED` (todos), `PIX`, `BOLETO`, `CREDIT_CARD`                       |
+| `chargeType`          | Sim         | `DETACHED` (avulso), `INSTALLMENT` (parcelado), `RECURRENT` (assinatura)  |
+| `value`               | Não         | Valor fixo; omitir para cliente definir                                   |
+| `subscriptionCycle`   | Não*        | Obrigatório se `chargeType=RECURRENT`: `WEEKLY`, `MONTHLY`, etc.          |
+| `maxInstallmentCount` | Não*        | Máx parcelas se `chargeType=INSTALLMENT`                                  |
+| `dueDateLimitDays`    | Não         | Dias úteis para boleto (se `billingType=BOLETO`)                          |
+| `externalReference`   | Não         | ID no Ailum para tracking                                                 |
+| `callback`            | Não         | `{ successUrl, autoRedirect }` — redirecionamento pós-pagamento           |
+
+**Resposta (201):** `{ id, url, viewCount, ... }` — use `url` para enviar ao cliente (WhatsApp, e-mail).
+
+#### Detalhe de um link (tracking)
+
+```http
+GET /v1/integrations/asaas/payment-links/:id
+```
+
+**Resposta:** Objeto completo com `viewCount` (visualizações), `url`, `active`, etc.
+
+---
+
+### 7. Assinaturas
+
+#### Listar assinaturas
+
+```http
+GET /v1/integrations/asaas/subscriptions?offset=0&limit=20&customer=cus_xxx&status=ACTIVE&externalReference=uuid
+```
+
+| Query              | Tipo   | Descrição                            |
+|--------------------|--------|--------------------------------------|
+| `offset`           | number | Paginação                            |
+| `limit`            | number | Itens por página                     |
+| `customer`         | string | ID do cliente Asaas                  |
+| `billingType`      | string | `BOLETO`, `CREDIT_CARD`, `PIX`, etc. |
+| `status`           | string | `ACTIVE`, `EXPIRED`, `INACTIVE`      |
+| `externalReference`| string | ID no Ailum                          |
+
+**Resposta:** Lista com `id`, `customer`, `value`, `cycle`, `nextDueDate`, `status`, `description`, etc.
+
+#### Criar assinatura (por cliente)
+
+```http
+POST /v1/integrations/asaas/subscriptions
+Content-Type: application/json
+
+{
+  "customer": "cus_000007670276",
+  "billingType": "PIX",
+  "value": 99.90,
+  "nextDueDate": "2026-04-15",
+  "cycle": "MONTHLY",
+  "description": "Plano mensal de acompanhamento"
+}
+```
+
+| Campo               | Obrigatório | Descrição                                                                    |
+|---------------------|-------------|------------------------------------------------------------------------------|
+| `customer`          | Sim         | ID do cliente no Asaas                                                       |
+| `billingType`       | Sim         | `BOLETO`, `CREDIT_CARD`, `PIX`, `UNDEFINED`                                  |
+| `value`             | Sim         | Valor da mensalidade                                                         |
+| `nextDueDate`       | Sim         | Vencimento da primeira cobrança (YYYY-MM-DD)                                 |
+| `cycle`             | Sim         | `WEEKLY`, `MONTHLY`, `BIMONTHLY`, `QUARTERLY`, `SEMIANNUALLY`, `YEARLY`      |
+| `description`       | Não         | Descrição                                                                    |
+| `externalReference` | Não         | ID no Ailum                                                                  |
+
+**Resposta (201):** `{ id, status, nextDueDate, ... }`
+
+---
+
 ## Dicas de UI/UX
 
 ### Dashboard Financeiro
@@ -253,6 +361,69 @@ Content-Type: application/json
 5. **Atualização**
    - Evitar polling intenso. Usar refresh manual ou intervalo de 30–60s.
    - Webhooks do Asaas já atualizam o backend; o front pode confiar nos dados retornados.
+
+---
+
+## Estrutura sugerida — Módulo Financeiro no Ailum
+
+### Navegação (sidebar / menu)
+
+```
+Financeiro
+├── Visão geral     (dashboard)
+├── Cobranças       (tabela payments)
+├── Clientes        (tabela customers)
+├── Links de pagamento
+├── Assinaturas
+└── Configurações   (Asaas, NF, impostos padrão)
+```
+
+### 1. Visão geral (dashboard)
+
+- **Cards:** Saldo, Recebido no mês, Pendente, Vencido
+- **Gráfico (opcional):** Receita por dia/semana/mês
+- **Ações rápidas:** Novo link, Nova assinatura
+
+### 2. Cobranças
+
+- **Tabela:** Data, Cliente, Valor, Tipo (PIX/Boleto/Cartão), Status, Fatura, Emitir NF
+- **Filtros:** Período, status, tipo, cliente
+- **Paginação:** offset/limit
+- **Ação:** Emitir NF (modal) — usa `municipal-options` e `taxes`
+
+### 3. Clientes
+
+- **Tabela:** Nome, CPF, E-mail, Telefone, Link para contato
+- **Busca:** Por nome ou CPF
+- **Link:** Se `externalReference` existe, abrir contato no Ailum
+
+### 4. Links de pagamento
+
+- **Tabela:** Nome, Valor, Tipo (avulso/parcelado/assinatura), Visualizações, Status, URL, Ações
+- **Botão:** Criar link → modal com formulário (name, value, chargeType, billingType, etc.)
+- **Ações:** Copiar URL, Ver detalhes (viewCount), Desativar (no Asaas)
+- **Tracking:** Exibir `viewCount` como indicador de engajamento
+
+### 5. Assinaturas
+
+- **Tabela:** Cliente, Valor, Ciclo, Próximo vencimento, Status
+- **Botão:** Nova assinatura → modal (exige `customer` do Asaas — buscar em customers)
+- **Filtros:** Status (ACTIVE, INACTIVE, EXPIRED), cliente
+
+### 6. Fluxo sugerido para Links
+
+1. Usuário clica em **Criar link**
+2. Modal com: Nome, Descrição, Valor (opcional), Tipo de cobrança (avulso/parcelado/assinatura), Formas de pagamento (PIX, Boleto, Cartão)
+3. Se parcelado: campo `maxInstallmentCount`
+4. Se assinatura: select `subscriptionCycle` (mensal, trimestral, etc.)
+5. Opcional: URL de sucesso (`callback.successUrl`) para redirecionar após pagamento
+6. Ao salvar, exibir o `url` com botão **Copiar** — usuário envia no WhatsApp, e-mail, etc.
+7. Na listagem, mostrar `viewCount` para acompanhar cliques
+
+### 7. Permissões
+
+- `BILLING_READ`: Ver todos os dados (cobranças, clientes, links, assinaturas, saldo)
+- `BILLING_WRITE`: Criar links, assinaturas, emitir NF
 
 ---
 

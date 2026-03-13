@@ -82,7 +82,7 @@ async function asaasFetch<T>(
 
 export async function createCustomer(
   apiKey: string,
-  params: { name: string; cpfCnpj?: string; email?: string; phone?: string },
+  params: { name: string; cpfCnpj?: string; email?: string; phone?: string; externalReference?: string },
 ): Promise<AsaasCustomer> {
   return asaasFetch<AsaasCustomer>(apiKey, '/customers', {
     method: 'POST',
@@ -91,6 +91,7 @@ export async function createCustomer(
       cpfCnpj: params.cpfCnpj,
       email: params.email,
       mobilePhone: params.phone,
+      externalReference: params.externalReference,
     }),
   })
 }
@@ -109,7 +110,13 @@ export async function findOrCreateCustomer(
     return searchResult.data[0]!
   }
 
-  return createCustomer(apiKey, { ...params })
+  return createCustomer(apiKey, {
+    name: params.name,
+    cpfCnpj: params.cpfCnpj,
+    email: params.email,
+    phone: params.phone,
+    externalReference: params.externalReference,
+  })
 }
 
 // ─── Payments ─────────────────────────────────────────────────────────────────
@@ -333,6 +340,209 @@ export function listMunicipalOptions(
   apiKey: string,
 ): Promise<{ data: AsaasMunicipalOption[] }> {
   return asaasFetch(apiKey, '/fiscalInfo/municipalOptions')
+}
+
+// ─── Payment Links ────────────────────────────────────────────────────────────
+
+export type PaymentLinkChargeType = 'DETACHED' | 'RECURRENT' | 'INSTALLMENT'
+export type PaymentLinkBillingType = 'UNDEFINED' | 'BOLETO' | 'CREDIT_CARD' | 'PIX'
+export type PaymentLinkCycle = 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' | 'BIMONTHLY' | 'QUARTERLY' | 'SEMIANNUALLY' | 'YEARLY'
+
+export interface AsaasPaymentLinkCreateParams {
+  name: string
+  description?: string
+  value?: number
+  billingType: PaymentLinkBillingType
+  chargeType: PaymentLinkChargeType
+  subscriptionCycle?: PaymentLinkCycle
+  maxInstallmentCount?: number
+  dueDateLimitDays?: number
+  endDate?: string
+  externalReference?: string
+  notificationEnabled?: boolean
+  isAddressRequired?: boolean
+  callback?: { successUrl: string; autoRedirect?: boolean }
+}
+
+export interface AsaasPaymentLinkResponse {
+  id: string
+  name: string
+  value?: number
+  active: boolean
+  chargeType: string
+  url: string
+  billingType: string
+  subscriptionCycle?: string
+  description?: string
+  endDate?: string
+  deleted?: boolean
+  viewCount: number
+  maxInstallmentCount?: number
+  dueDateLimitDays?: number
+  externalReference?: string
+}
+
+export interface AsaasPaymentLinkListParams {
+  offset?: number
+  limit?: number
+  active?: boolean
+  includeDeleted?: boolean
+  name?: string
+  externalReference?: string
+}
+
+export interface AsaasPaymentLinkListResponse {
+  object: string
+  hasMore: boolean
+  totalCount: number
+  limit: number
+  offset: number
+  data: AsaasPaymentLinkResponse[]
+}
+
+// ─── Subscriptions ───────────────────────────────────────────────────────────
+
+export type SubscriptionBillingType = 'UNDEFINED' | 'BOLETO' | 'CREDIT_CARD' | 'DEBIT_CARD' | 'TRANSFER' | 'DEPOSIT' | 'PIX'
+export type SubscriptionCycle = 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' | 'BIMONTHLY' | 'QUARTERLY' | 'SEMIANNUALLY' | 'YEARLY'
+
+export interface AsaasSubscriptionCreateParams {
+  customer: string
+  billingType: SubscriptionBillingType
+  value: number
+  nextDueDate: string
+  cycle: SubscriptionCycle
+  description?: string
+  endDate?: string
+  maxPayments?: number
+  externalReference?: string
+  discount?: { value: number; dueDateLimitDays?: number; type: 'FIXED' | 'PERCENTAGE' }
+  fine?: { value: number; type: 'FIXED' | 'PERCENTAGE' }
+  interest?: { value: number }
+}
+
+export interface AsaasSubscriptionResponse {
+  id: string
+  object?: string
+  dateCreated?: string
+  customer: string
+  billingType: string
+  cycle: string
+  value: number
+  nextDueDate: string
+  endDate?: string
+  description?: string
+  status: string
+  externalReference?: string
+}
+
+export interface AsaasSubscriptionListParams {
+  offset?: number
+  limit?: number
+  customer?: string
+  billingType?: SubscriptionBillingType
+  status?: 'ACTIVE' | 'EXPIRED' | 'INACTIVE'
+  externalReference?: string
+}
+
+export interface AsaasSubscriptionListResponse {
+  object: string
+  hasMore: boolean
+  totalCount: number
+  limit: number
+  offset: number
+  data: AsaasSubscriptionResponse[]
+}
+
+export function createPaymentLink(
+  apiKey: string,
+  params: AsaasPaymentLinkCreateParams,
+): Promise<AsaasPaymentLinkResponse> {
+  const body: Record<string, unknown> = {
+    name: params.name,
+    billingType: params.billingType,
+    chargeType: params.chargeType,
+    description: params.description,
+    value: params.value,
+    endDate: params.endDate,
+    externalReference: params.externalReference,
+    notificationEnabled: params.notificationEnabled ?? true,
+    isAddressRequired: params.isAddressRequired ?? false,
+  }
+  if (params.chargeType === 'RECURRENT' && params.subscriptionCycle) {
+    body.subscriptionCycle = params.subscriptionCycle
+  }
+  if (params.chargeType === 'INSTALLMENT' && params.maxInstallmentCount != null) {
+    body.maxInstallmentCount = params.maxInstallmentCount
+  }
+  if (params.billingType === 'BOLETO' && params.dueDateLimitDays != null) {
+    body.dueDateLimitDays = params.dueDateLimitDays
+  }
+  if (params.callback) {
+    body.callback = params.callback
+  }
+  return asaasFetch(apiKey, '/paymentLinks', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export function listPaymentLinks(
+  apiKey: string,
+  params: AsaasPaymentLinkListParams = {},
+): Promise<AsaasPaymentLinkListResponse> {
+  const q = new URLSearchParams()
+  if (params.offset != null) q.set('offset', String(params.offset))
+  if (params.limit != null) q.set('limit', String(params.limit))
+  if (params.active != null) q.set('active', String(params.active))
+  if (params.includeDeleted != null) q.set('includeDeleted', String(params.includeDeleted))
+  if (params.name) q.set('name', params.name)
+  if (params.externalReference) q.set('externalReference', params.externalReference)
+  return asaasFetch(apiKey, `/paymentLinks?${q}`)
+}
+
+export function getPaymentLink(
+  apiKey: string,
+  linkId: string,
+): Promise<AsaasPaymentLinkResponse> {
+  return asaasFetch(apiKey, `/paymentLinks/${linkId}`)
+}
+
+export function createSubscription(
+  apiKey: string,
+  params: AsaasSubscriptionCreateParams,
+): Promise<AsaasSubscriptionResponse> {
+  const body: Record<string, unknown> = {
+    customer: params.customer,
+    billingType: params.billingType,
+    value: params.value,
+    nextDueDate: params.nextDueDate,
+    cycle: params.cycle,
+    description: params.description,
+    endDate: params.endDate,
+    maxPayments: params.maxPayments,
+    externalReference: params.externalReference,
+  }
+  if (params.discount) body.discount = params.discount
+  if (params.fine) body.fine = params.fine
+  if (params.interest) body.interest = params.interest
+  return asaasFetch(apiKey, '/subscriptions', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export function listSubscriptions(
+  apiKey: string,
+  params: AsaasSubscriptionListParams = {},
+): Promise<AsaasSubscriptionListResponse> {
+  const q = new URLSearchParams()
+  if (params.offset != null) q.set('offset', String(params.offset))
+  if (params.limit != null) q.set('limit', String(params.limit))
+  if (params.customer) q.set('customer', params.customer)
+  if (params.billingType) q.set('billingType', params.billingType)
+  if (params.status) q.set('status', params.status)
+  if (params.externalReference) q.set('externalReference', params.externalReference)
+  return asaasFetch(apiKey, `/subscriptions?${q}`)
 }
 
 export function scheduleInvoice(

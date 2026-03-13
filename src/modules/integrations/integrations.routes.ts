@@ -23,6 +23,11 @@ import {
   getFinanceBalance,
   listMunicipalOptions,
   scheduleInvoice,
+  createPaymentLink,
+  listPaymentLinks,
+  getPaymentLink,
+  createSubscription,
+  listSubscriptions,
 } from '../../services/asaas.service.js'
 import { FirebaseSyncService } from '../../services/firebase-sync.service.js'
 
@@ -206,6 +211,114 @@ export async function integrationsRoutes(fastify: FastifyInstance) {
     const body = req.body as Parameters<typeof scheduleInvoice>[1]
     const invoice = await scheduleInvoice(apiKey, body)
     return reply.status(201).send(invoice)
+  })
+
+  // ── Payment Links ───────────────────────────────────────────────────────────
+  const asaasBillingWrite = [fastify.authenticate, fastify.authorize(PERMISSIONS.BILLING_WRITE)]
+
+  // GET /v1/integrations/asaas/payment-links — lista links de pagamento
+  fastify.get('/asaas/payment-links', { onRequest: asaasAuth }, async (req, reply) => {
+    const apiKey = await getAsaasApiKey(fastify.db, req.tenantId)
+    if (!apiKey) return reply.code(404).send({ error: 'Integração Asaas não configurada' })
+    const q = req.query as { offset?: string; limit?: string; active?: string; name?: string; externalReference?: string }
+    const data = await listPaymentLinks(apiKey, {
+      offset: q.offset != null ? Number(q.offset) : undefined,
+      limit: q.limit != null ? Number(q.limit) : undefined,
+      active: q.active === 'true' ? true : q.active === 'false' ? false : undefined,
+      name: q.name,
+      externalReference: q.externalReference,
+    })
+    return data
+  })
+
+  // POST /v1/integrations/asaas/payment-links — cria link de pagamento
+  fastify.post('/asaas/payment-links', {
+    onRequest: asaasBillingWrite,
+    schema: {
+      body: {
+        type: 'object',
+        required: ['name', 'billingType', 'chargeType'],
+        properties: {
+          name: { type: 'string' },
+          description: { type: 'string' },
+          value: { type: 'number' },
+          billingType: { type: 'string', enum: ['UNDEFINED', 'BOLETO', 'CREDIT_CARD', 'PIX'] },
+          chargeType: { type: 'string', enum: ['DETACHED', 'RECURRENT', 'INSTALLMENT'] },
+          subscriptionCycle: { type: 'string', enum: ['WEEKLY', 'BIWEEKLY', 'MONTHLY', 'BIMONTHLY', 'QUARTERLY', 'SEMIANNUALLY', 'YEARLY'] },
+          maxInstallmentCount: { type: 'number' },
+          dueDateLimitDays: { type: 'number' },
+          endDate: { type: 'string', format: 'date' },
+          externalReference: { type: 'string' },
+          notificationEnabled: { type: 'boolean' },
+          isAddressRequired: { type: 'boolean' },
+          callback: { type: 'object', properties: { successUrl: { type: 'string' }, autoRedirect: { type: 'boolean' } } },
+        },
+      },
+    },
+  }, async (req, reply) => {
+    const apiKey = await getAsaasApiKey(fastify.db, req.tenantId)
+    if (!apiKey) return reply.code(404).send({ error: 'Integração Asaas não configurada' })
+    const body = req.body as Parameters<typeof createPaymentLink>[1]
+    const link = await createPaymentLink(apiKey, body)
+    return reply.status(201).send(link)
+  })
+
+  // GET /v1/integrations/asaas/payment-links/:id — detalhe de um link (inclui viewCount)
+  fastify.get('/asaas/payment-links/:id', { onRequest: asaasAuth }, async (req, reply) => {
+    const apiKey = await getAsaasApiKey(fastify.db, req.tenantId)
+    if (!apiKey) return reply.code(404).send({ error: 'Integração Asaas não configurada' })
+    const { id } = req.params as { id: string }
+    const link = await getPaymentLink(apiKey, id)
+    return link
+  })
+
+  // ── Subscriptions ───────────────────────────────────────────────────────────
+
+  // GET /v1/integrations/asaas/subscriptions — lista assinaturas
+  fastify.get('/asaas/subscriptions', { onRequest: asaasAuth }, async (req, reply) => {
+    const apiKey = await getAsaasApiKey(fastify.db, req.tenantId)
+    if (!apiKey) return reply.code(404).send({ error: 'Integração Asaas não configurada' })
+    const q = req.query as { offset?: string; limit?: string; customer?: string; billingType?: string; status?: string; externalReference?: string }
+    const data = await listSubscriptions(apiKey, {
+      offset: q.offset != null ? Number(q.offset) : undefined,
+      limit: q.limit != null ? Number(q.limit) : undefined,
+      customer: q.customer,
+      billingType: q.billingType as 'UNDEFINED' | 'BOLETO' | 'CREDIT_CARD' | 'PIX' | undefined,
+      status: q.status as 'ACTIVE' | 'EXPIRED' | 'INACTIVE' | undefined,
+      externalReference: q.externalReference,
+    })
+    return data
+  })
+
+  // POST /v1/integrations/asaas/subscriptions — cria assinatura (por cliente)
+  fastify.post('/asaas/subscriptions', {
+    onRequest: asaasBillingWrite,
+    schema: {
+      body: {
+        type: 'object',
+        required: ['customer', 'billingType', 'value', 'nextDueDate', 'cycle'],
+        properties: {
+          customer: { type: 'string' },
+          billingType: { type: 'string', enum: ['UNDEFINED', 'BOLETO', 'CREDIT_CARD', 'DEBIT_CARD', 'TRANSFER', 'DEPOSIT', 'PIX'] },
+          value: { type: 'number' },
+          nextDueDate: { type: 'string', format: 'date' },
+          cycle: { type: 'string', enum: ['WEEKLY', 'BIWEEKLY', 'MONTHLY', 'BIMONTHLY', 'QUARTERLY', 'SEMIANNUALLY', 'YEARLY'] },
+          description: { type: 'string' },
+          endDate: { type: 'string', format: 'date' },
+          maxPayments: { type: 'number' },
+          externalReference: { type: 'string' },
+          discount: { type: 'object', properties: { value: { type: 'number' }, dueDateLimitDays: { type: 'number' }, type: { type: 'string', enum: ['FIXED', 'PERCENTAGE'] } } },
+          fine: { type: 'object', properties: { value: { type: 'number' }, type: { type: 'string', enum: ['FIXED', 'PERCENTAGE'] } } },
+          interest: { type: 'object', properties: { value: { type: 'number' } } },
+        },
+      },
+    },
+  }, async (req, reply) => {
+    const apiKey = await getAsaasApiKey(fastify.db, req.tenantId)
+    if (!apiKey) return reply.code(404).send({ error: 'Integração Asaas não configurada' })
+    const body = req.body as Parameters<typeof createSubscription>[1]
+    const sub = await createSubscription(apiKey, body)
+    return reply.status(201).send(sub)
   })
 
   // DELETE /v1/integrations/:provider — desativa uma integração
