@@ -178,3 +178,192 @@ export async function cancelPayment(
 ): Promise<void> {
   await asaasFetch<void>(apiKey, `/payments/${paymentId}`, { method: 'DELETE' })
 }
+
+// ─── Finance / Listagens (para módulo financeiro) ─────────────────────────────
+
+export interface AsaasCustomerListParams {
+  offset?: number
+  limit?: number
+  name?: string
+  email?: string
+  cpfCnpj?: string
+  externalReference?: string
+}
+
+export interface AsaasCustomerListResponse {
+  object: string
+  hasMore: boolean
+  totalCount: number
+  limit: number
+  offset: number
+  data: AsaasCustomerDetail[]
+}
+
+export interface AsaasCustomerDetail extends AsaasCustomer {
+  dateCreated?: string
+  mobilePhone?: string
+  address?: string
+  externalReference?: string | null
+}
+
+export interface AsaasPaymentListParams {
+  offset?: number
+  limit?: number
+  customer?: string
+  billingType?: string
+  status?: string
+  externalReference?: string
+  dateCreated?: { ge?: string; le?: string }
+  dueDate?: { ge?: string; le?: string }
+  paymentDate?: { ge?: string; le?: string }
+}
+
+export interface AsaasPaymentListResponse {
+  object: string
+  hasMore: boolean
+  totalCount: number
+  limit: number
+  offset: number
+  data: AsaasPaymentDetail[]
+}
+
+export interface AsaasPaymentDetail {
+  id: string
+  dateCreated: string
+  customer: string
+  paymentLink?: string | null
+  value: number
+  netValue?: number
+  billingType: string
+  status: string
+  dueDate: string
+  paymentDate?: string | null
+  description?: string | null
+  externalReference?: string | null
+  invoiceUrl?: string | null
+  invoiceNumber?: string | null
+}
+
+export interface AsaasBalanceResponse {
+  balance: number
+}
+
+export interface AsaasMunicipalOption {
+  id: string
+  code: string
+  name: string
+}
+
+export interface AsaasInvoiceTaxes {
+  retainIss: boolean
+  iss: number
+  pis: number
+  cofins: number
+  csll: number
+  inss: number
+  ir: number
+  pisCofinsRetentionType?: string
+  pisCofinsTaxStatus?: string
+}
+
+export interface AsaasInvoiceParams {
+  payment: string
+  serviceDescription: string
+  observations: string
+  value: number
+  deductions?: number
+  effectiveDate: string
+  municipalServiceId?: string
+  municipalServiceCode?: string
+  municipalServiceName: string
+  taxes: AsaasInvoiceTaxes
+  externalReference?: string
+  updatePayment?: boolean
+}
+
+export interface AsaasInvoiceResponse {
+  id: string
+  status: string
+  customer?: string
+  payment?: string
+  value?: number
+  pdfUrl?: string | null
+  xmlUrl?: string | null
+}
+
+export function listCustomers(
+  apiKey: string,
+  params: AsaasCustomerListParams = {},
+): Promise<AsaasCustomerListResponse> {
+  const q = new URLSearchParams()
+  if (params.offset != null) q.set('offset', String(params.offset))
+  if (params.limit != null) q.set('limit', String(params.limit))
+  if (params.name) q.set('name', params.name)
+  if (params.email) q.set('email', params.email)
+  if (params.cpfCnpj) q.set('cpfCnpj', params.cpfCnpj)
+  if (params.externalReference) q.set('externalReference', params.externalReference)
+  return asaasFetch(apiKey, `/customers?${q}`)
+}
+
+export function listPayments(
+  apiKey: string,
+  params: AsaasPaymentListParams = {},
+): Promise<AsaasPaymentListResponse> {
+  const q = new URLSearchParams()
+  if (params.offset != null) q.set('offset', String(params.offset))
+  if (params.limit != null) q.set('limit', String(params.limit))
+  if (params.customer) q.set('customer', params.customer)
+  if (params.billingType) q.set('billingType', params.billingType)
+  if (params.status) q.set('status', params.status)
+  if (params.externalReference) q.set('externalReference', params.externalReference)
+  if (params.dateCreated?.ge) q.set('dateCreated[ge]', params.dateCreated.ge)
+  if (params.dateCreated?.le) q.set('dateCreated[le]', params.dateCreated.le)
+  if (params.dueDate?.ge) q.set('dueDate[ge]', params.dueDate.ge)
+  if (params.dueDate?.le) q.set('dueDate[le]', params.dueDate.le)
+  if (params.paymentDate?.ge) q.set('paymentDate[ge]', params.paymentDate.ge)
+  if (params.paymentDate?.le) q.set('paymentDate[le]', params.paymentDate.le)
+  return asaasFetch(apiKey, `/payments?${q}`)
+}
+
+export function getFinanceBalance(apiKey: string): Promise<AsaasBalanceResponse> {
+  return asaasFetch(apiKey, '/finance/balance')
+}
+
+export function listMunicipalOptions(
+  apiKey: string,
+): Promise<{ data: AsaasMunicipalOption[] }> {
+  return asaasFetch(apiKey, '/fiscalInfo/municipalOptions')
+}
+
+export function scheduleInvoice(
+  apiKey: string,
+  params: AsaasInvoiceParams,
+): Promise<AsaasInvoiceResponse> {
+  return asaasFetch(apiKey, '/invoices', {
+    method: 'POST',
+    body: JSON.stringify({
+      payment: params.payment,
+      serviceDescription: params.serviceDescription,
+      observations: params.observations,
+      value: params.value,
+      deductions: params.deductions ?? 0,
+      effectiveDate: params.effectiveDate,
+      municipalServiceId: params.municipalServiceId,
+      municipalServiceCode: params.municipalServiceCode,
+      municipalServiceName: params.municipalServiceName,
+      taxes: {
+        retainIss: params.taxes.retainIss,
+        iss: params.taxes.iss,
+        pis: params.taxes.pis,
+        cofins: params.taxes.cofins,
+        csll: params.taxes.csll,
+        inss: params.taxes.inss,
+        ir: params.taxes.ir,
+        pisCofinsRetentionType: params.taxes.pisCofinsRetentionType ?? 'NOT_WITHHELD',
+        pisCofinsTaxStatus: params.taxes.pisCofinsTaxStatus ?? 'STANDARD_TAXABLE_OPERATION',
+      },
+      externalReference: params.externalReference,
+      updatePayment: params.updatePayment,
+    }),
+  })
+}

@@ -137,6 +137,18 @@ export async function upsertAsaasIntegration(
   }
 }
 
+export async function getAsaasApiKey(
+  db: PrismaClient,
+  tenantId: string,
+): Promise<string | null> {
+  const row = await db.tenantIntegration.findFirst({
+    where: { tenantId, provider: 'asaas', isActive: true },
+    select: { apiKeyEncrypted: true },
+  })
+  if (!row?.apiKeyEncrypted) return null
+  return decrypt(row.apiKeyEncrypted)
+}
+
 // ─── Desativar ────────────────────────────────────────────────────────────────
 
 export async function deactivateIntegration(

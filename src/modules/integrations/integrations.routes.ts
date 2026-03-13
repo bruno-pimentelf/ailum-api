@@ -9,6 +9,7 @@ import {
   listIntegrations,
   upsertZapiIntegration,
   upsertAsaasIntegration,
+  getAsaasApiKey,
   deactivateIntegration,
   testZapiConnection,
   registerZapiWebhooks,
@@ -16,6 +17,13 @@ import {
   disconnectZapiInstance,
   restartZapiInstance,
 } from './integrations.service.js'
+import {
+  listCustomers,
+  listPayments,
+  getFinanceBalance,
+  listMunicipalOptions,
+  scheduleInvoice,
+} from '../../services/asaas.service.js'
 import { FirebaseSyncService } from '../../services/firebase-sync.service.js'
 
 export async function integrationsRoutes(fastify: FastifyInstance) {
@@ -94,6 +102,110 @@ export async function integrationsRoutes(fastify: FastifyInstance) {
     const body = req.body as { apiKey: string }
     const result = await upsertAsaasIntegration(fastify.db, req.tenantId, body)
     return reply.status(200).send(result)
+  })
+
+  // ── Asaas Finance (módulo financeiro) ────────────────────────────────────────
+  const asaasAuth = [fastify.authenticate, fastify.authorize(PERMISSIONS.BILLING_READ)]
+
+  // GET /v1/integrations/asaas/customers — lista clientes do Asaas
+  fastify.get('/asaas/customers', { onRequest: asaasAuth }, async (req, reply) => {
+    const apiKey = await getAsaasApiKey(fastify.db, req.tenantId)
+    if (!apiKey) return reply.code(404).send({ error: 'Integração Asaas não configurada' })
+    const q = req.query as { offset?: string; limit?: string; name?: string; cpfCnpj?: string; externalReference?: string }
+    const data = await listCustomers(apiKey, {
+      offset: q.offset != null ? Number(q.offset) : undefined,
+      limit: q.limit != null ? Number(q.limit) : undefined,
+      name: q.name,
+      cpfCnpj: q.cpfCnpj,
+      externalReference: q.externalReference,
+    })
+    return data
+  })
+
+  // GET /v1/integrations/asaas/payments — lista cobranças do Asaas
+  fastify.get('/asaas/payments', { onRequest: asaasAuth }, async (req, reply) => {
+    const apiKey = await getAsaasApiKey(fastify.db, req.tenantId)
+    if (!apiKey) return reply.code(404).send({ error: 'Integração Asaas não configurada' })
+    const q = req.query as {
+      offset?: string; limit?: string; customer?: string; billingType?: string;
+      status?: string; externalReference?: string;
+      dateCreatedGe?: string; dateCreatedLe?: string;
+      dueDateGe?: string; dueDateLe?: string;
+      paymentDateGe?: string; paymentDateLe?: string;
+    }
+    const data = await listPayments(apiKey, {
+      offset: q.offset != null ? Number(q.offset) : undefined,
+      limit: q.limit != null ? Number(q.limit) : undefined,
+      customer: q.customer,
+      billingType: q.billingType,
+      status: q.status,
+      externalReference: q.externalReference,
+      dateCreated: (q.dateCreatedGe || q.dateCreatedLe) ? { ge: q.dateCreatedGe, le: q.dateCreatedLe } : undefined,
+      dueDate: (q.dueDateGe || q.dueDateLe) ? { ge: q.dueDateGe, le: q.dueDateLe } : undefined,
+      paymentDate: (q.paymentDateGe || q.paymentDateLe) ? { ge: q.paymentDateGe, le: q.paymentDateLe } : undefined,
+    })
+    return data
+  })
+
+  // GET /v1/integrations/asaas/finance/balance — saldo da conta Asaas
+  fastify.get('/asaas/finance/balance', { onRequest: asaasAuth }, async (req, reply) => {
+    const apiKey = await getAsaasApiKey(fastify.db, req.tenantId)
+    if (!apiKey) return reply.code(404).send({ error: 'Integração Asaas não configurada' })
+    const data = await getFinanceBalance(apiKey)
+    return data
+  })
+
+  // GET /v1/integrations/asaas/municipal-options — serviços municipais para NF
+  fastify.get('/asaas/municipal-options', { onRequest: asaasAuth }, async (req, reply) => {
+    const apiKey = await getAsaasApiKey(fastify.db, req.tenantId)
+    if (!apiKey) return reply.code(404).send({ error: 'Integração Asaas não configurada' })
+    const data = await listMunicipalOptions(apiKey)
+    return data
+  })
+
+  // POST /v1/integrations/asaas/invoices — agenda nota fiscal para uma cobrança
+  fastify.post('/asaas/invoices', {
+    onRequest: [fastify.authenticate, fastify.authorize(PERMISSIONS.BILLING_WRITE)],
+    schema: {
+      body: {
+        type: 'object',
+        required: ['payment', 'serviceDescription', 'observations', 'value', 'effectiveDate', 'municipalServiceName', 'taxes'],
+        properties: {
+          payment: { type: 'string' },
+          serviceDescription: { type: 'string' },
+          observations: { type: 'string' },
+          value: { type: 'number' },
+          deductions: { type: 'number' },
+          effectiveDate: { type: 'string', format: 'date' },
+          municipalServiceId: { type: 'string' },
+          municipalServiceCode: { type: 'string' },
+          municipalServiceName: { type: 'string' },
+          externalReference: { type: 'string' },
+          updatePayment: { type: 'boolean' },
+          taxes: {
+            type: 'object',
+            required: ['retainIss', 'iss', 'pis', 'cofins', 'csll', 'inss', 'ir'],
+            properties: {
+              retainIss: { type: 'boolean' },
+              iss: { type: 'number' },
+              pis: { type: 'number' },
+              cofins: { type: 'number' },
+              csll: { type: 'number' },
+              inss: { type: 'number' },
+              ir: { type: 'number' },
+              pisCofinsRetentionType: { type: 'string' },
+              pisCofinsTaxStatus: { type: 'string' },
+            },
+          },
+        },
+      },
+    },
+  }, async (req, reply) => {
+    const apiKey = await getAsaasApiKey(fastify.db, req.tenantId)
+    if (!apiKey) return reply.code(404).send({ error: 'Integração Asaas não configurada' })
+    const body = req.body as Parameters<typeof scheduleInvoice>[1]
+    const invoice = await scheduleInvoice(apiKey, body)
+    return reply.status(201).send(invoice)
   })
 
   // DELETE /v1/integrations/:provider — desativa uma integração
