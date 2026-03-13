@@ -6,7 +6,8 @@ Documentação do fluxo PIX (Asaas + Z-API) e o que o frontend precisa implement
 
 ## Resumo
 
-- **PIX obrigatório antes de confirmar** — flag configurável por stage
+- **Fluxo PIX-antes** — quando `requirePaymentBeforeConfirm`: PIX é enviado primeiro, a consulta só é criada após confirmação do pagamento
+- **Fluxo normal** — PIX opcional após criar appointment (existe appointment, PIX vincula a ele)
 - **Envio automático** — QR code + código copia-e-cola via WhatsApp
 - **Playground** — exibe PIX (QR + código) no chat para teste
 - **Configuração Asaas** — API key Sandbox por tenant
@@ -49,9 +50,9 @@ Em `NODE_ENV !== 'production'` o backend usa automaticamente `https://api-sandbo
 
 ---
 
-## 2. Stage: Exigir PIX antes de confirmar
+## 2. Stage: PIX antes de agendar
 
-A flag `requirePaymentBeforeConfirm` fica no **agent config do stage** (ex.: "Consulta Agendada").
+A flag `requirePaymentBeforeConfirm` fica no **agent config do stage** onde o contato escolhe horário (ex.: "Qualificado" ou "Novo Lead" — o stage que tem `search_availability` e `create_appointment`).
 
 ### API
 
@@ -61,18 +62,18 @@ Content-Type: application/json
 
 {
   "requirePaymentBeforeConfirm": true,
-  "allowedTools": ["search_availability", "create_appointment", "generate_pix", "move_stage", "send_message", "notify_operator"]
+  "allowedTools": ["search_availability", "generate_pix", "move_stage", "send_message", "notify_operator"]
 }
 ```
 
-**Importante:** o stage deve ter `generate_pix` em `allowedTools` quando `requirePaymentBeforeConfirm` estiver ativo.
+**Importante:** quando `requirePaymentBeforeConfirm` é `true`, `create_appointment` é automaticamente removido. O agente usa apenas `generate_pix` com `professional_id`, `service_id`, `scheduled_at`. A consulta é criada pelo webhook após o pagamento.
 
 ### Comportamento
 
 | `requirePaymentBeforeConfirm` | Fluxo |
 |------------------------------|-------|
-| `false` (padrão)             | Agendamento pode ser confirmado sem PIX |
-| `true`                       | Após `create_appointment`, o agente chama `generate_pix` com `appointment_id`. A consulta só fica confirmada após o pagamento |
+| `false` (padrão)             | `create_appointment` → consulta criada. PIX opcional via `generate_pix` com `appointment_id` |
+| `true`                       | `generate_pix` com `professional_id`, `service_id`, `scheduled_at` → PIX enviado → usuário paga → webhook cria a consulta |
 
 ---
 
@@ -170,22 +171,30 @@ interface ChatMessage {
 
 ---
 
-## 6. Fluxo resumido
+## 6. Fluxos resumidos
+
+### PIX-antes (requirePaymentBeforeConfirm = true)
 
 ```
-create_appointment (PENDING)
+search_availability → contato escolhe horário
     ↓
-generate_pix (com appointment_id, se requirePaymentBeforeConfirm)
+generate_pix (professional_id, service_id, scheduled_at, amount, description)
     ↓
-Backend envia PIX:
-  - WhatsApp: texto + QR + código
-  - Playground: Message PIX_CHARGE no Firestore
+Backend envia PIX (WhatsApp ou Playground)
     ↓
 Usuário paga
     ↓
-Webhook Asaas PAYMENT_CONFIRMED
+Webhook Asaas PAYMENT_CONFIRMED → cria appointment CONFIRMED
+```
+
+### Fluxo normal (requirePaymentBeforeConfirm = false)
+
+```
+create_appointment (PENDING) → move para Consulta Agendada
     ↓
-Appointment → CONFIRMED
+Opcional: generate_pix (appointment_id)
+    ↓
+Webhook PAYMENT_CONFIRMED → appointment → CONFIRMED
 ```
 
 ---

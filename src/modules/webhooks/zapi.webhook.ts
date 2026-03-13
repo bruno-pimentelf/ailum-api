@@ -508,8 +508,13 @@ async function handleReceived(fastify: FastifyInstance, payload: ZapiReceivedPay
       )
       return
     }
+    // Nunca usar playground como fallback — mensagens do WhatsApp real não vão para o playground
     const lastOutgoing = await fastify.db.message.findFirst({
-      where: { tenantId, role: { in: ['OPERATOR', 'AGENT'] } },
+      where: {
+        tenantId,
+        role: { in: ['OPERATOR', 'AGENT'] },
+        contact: { phone: { not: '__playground__' } },
+      },
       orderBy: { createdAt: 'desc' },
       select: { contactId: true },
     })

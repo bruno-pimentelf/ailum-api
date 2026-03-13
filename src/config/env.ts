@@ -17,6 +17,10 @@ const envSchema = z.object({
   FIREBASE_CLIENT_EMAIL: z.string().optional().default(''),
   FIREBASE_PRIVATE_KEY: z.string().optional().default(''),
   ASAAS_WEBHOOK_TOKEN: z.string().optional().default(''),
+  ASAAS_USE_SANDBOX: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true' || v === '1'),
   ZAPI_WEBHOOK_TOKEN: z.string().optional().default(''),
   ELEVENLABS_API_KEY: z.string().optional().default(''),
   RESEND_API_KEY: z.string().optional().default(''),

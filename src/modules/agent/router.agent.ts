@@ -48,16 +48,16 @@ INTENÇÕES VÁLIDAS:
 - WANTS_RESCHEDULE: quer remarcar consulta
 
 EXEMPLOS (retorne JSON no mesmo formato):
-- "Quero 9:00", "pode ser às 9", "quero hoje" → intent: WANTS_SCHEDULE, confidence: 0.9
-- "Sim", "confirmo", "está certo", "pode ser" (após proposta de horário ou pedido de confirmação) → intent: CONFIRMING, confidence: 0.95
-- "10h", "9h", "às 10", "10:00" (resposta à pergunta "qual horário?") → intent: CONFIRMING, confidence: 0.95
+- "Quero 9:00", "pode ser às 9", "quero hoje" (pedido inicial) → intent: WANTS_SCHEDULE, confidence: 0.9
+- "Sim", "confirmo", "está certo", "pode ser" (após proposta de horário) → intent: CONFIRMING, confidence: 0.95
+- "10h", "9h", "8:50", "09:30", "às 10" (resposta à pergunta "qual horário?" com só o horário) → intent: CONFIRMING, confidence: 0.95
 - Mensagem com nome + CPF + telefone (ex: "Daniel Moreira, 19054112786, 27995072522") após pedido desses dados → intent: CONFIRMING, confidence: 0.95
 - "Quero marcar uma consulta" ou "Oi, quero marcar uma consulta" → intent: WANTS_SCHEDULE, confidence: 0.95
 - "Quais profissionais disponíveis?" → intent: WANTS_INFO, confidence: 0.9
 - "Olá" sozinho → intent: GREETING, confidence: 0.9
 
 REGRAS:
-- CONTEXTO OBRIGATÓRIO: Se a ÚLTIMA mensagem do ASSISTENTE ofereceu horários (ex: "temos disponibilidade", "horários livres", "qual horário?", "10h, 13h, 14h") e a NOVA mensagem do contato é só um horário ("10h", "9h", "às 10") ou confirmação ("sim", "pode ser", "esse mesmo"), retorne SEMPRE intent: CONFIRMING e confidence: 0.95. O agente precisa disso para executar o agendamento.
+- CONTEXTO OBRIGATÓRIO: Se a última mensagem do ASSISTENTE ofereceu horários (ex: "temos disponibilidade", "qual horário?", "08:50, 09:40, 10:30...") e a nova mensagem do contato é APENAS um horário ("8:50", "09:30", "10h") ou confirmação ("sim", "pode ser"), retorne SEMPRE intent: CONFIRMING e confidence: 0.95. Nunca retorne WANTS_SCHEDULE nesse caso.
 - CRISIS → always shouldEscalate: true
 - confidence < 0.70 → shouldEscalate: true
 - Saudação + pedido = classifique pelo pedido ("oi, quero consulta" → WANTS_SCHEDULE)
@@ -121,7 +121,7 @@ function lastAssistantMessageOfferedSlots(messages: AgentContext['messages']): b
   if (!lastFromAssistant || typeof lastFromAssistant.content !== 'string') return false
   const text = lastFromAssistant.content.toLowerCase()
   const slotOrConfirmCues =
-    /horário|horarios|disponibilidade|disponível|qual horário|qual período|período você prefere|temos (disponibilidade|horários)|livres?\b|(a partir das?|pela manhã|à tarde|\d{1,2}h|\d{1,2}:\d{2})|(às|as)\s+\d{1,2}h?|(me\s+)?confirma|finalizar o agendamento|para eu finalizar/i
+    /hor[áa]rio|horarios|disponibilidade|dispon[ií]vel|qual hor[áa]rio|qual per[ií]odo|per[ií]odo voc[eê] prefere|temos (disponibilidade|hor[áa]rios)|livres?\b|(a partir das?|pela manh[ãa]|[àa] tarde|\d{1,2}h|\d{1,2}:\d{2})|([àa]s)\s+\d{1,2}h?|(me\s+)?confirma|finalizar o agendamento|para eu finalizar|qual prefere/i
   return slotOrConfirmCues.test(text)
 }
 
@@ -135,9 +135,11 @@ function isShortTimeOrConfirmation(message: string): boolean {
     )
   )
     return true
-  if (/^\d{1,2}h$/i.test(m)) return true
-  if (/^\d{1,2}\s*:\s*\d{2}$/.test(m)) return true
-  if (/^às?\s*\d{1,2}h?/i.test(m) || /^as\s*\d{1,2}h?/i.test(m)) return true
+  // 9h, 09h, 9:30, 09:30, 9.30, 8:50, 9h30
+  if (/^\d{1,2}h\d{0,2}$/i.test(m)) return true
+  if (/^\d{1,2}\s*[:\.]\s*\d{2}$/.test(m)) return true
+  if (/^às?\s*\d{1,2}h?\d{0,2}/i.test(m) || /^as\s*\d{1,2}h?\d{0,2}/i.test(m)) return true
+  if (/^\d{1,2}\s*[h:]\s*\d{0,2}$/i.test(m)) return true
   return false
 }
 

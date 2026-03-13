@@ -27,6 +27,9 @@ interface GeneratePixInput {
   amount: number
   description: string
   appointment_id?: string
+  professional_id?: string
+  service_id?: string
+  scheduled_at?: string
   due_hours?: number
 }
 
@@ -345,6 +348,77 @@ async function generatePix(
   db: FastifyInstance['db'],
   sync: FirebaseSyncService,
 ): Promise<ToolResult> {
+  const isPixFirst =
+    input.professional_id && input.service_id && input.scheduled_at && !input.appointment_id
+
+  if (!input.appointment_id && !isPixFirst) {
+    return {
+      success: false,
+      requiresConfirmation: false,
+      reason:
+        'Informe appointment_id (fluxo normal) ou professional_id + service_id + scheduled_at (fluxo PIX antes de agendar).',
+    }
+  }
+
+  let pendingAppointment: { scheduledAt: string; professionalId: string; serviceId: string; durationMin: number } | null =
+    null
+
+  if (isPixFirst) {
+    const scheduledAt = new Date(input.scheduled_at!)
+    if (Number.isNaN(scheduledAt.getTime())) {
+      return {
+        success: false,
+        requiresConfirmation: false,
+        reason: `Data/horário inválido: "${input.scheduled_at}". Use formato ISO: YYYY-MM-DDTHH:mm:ss-03:00`,
+      }
+    }
+    if (input.professional_id === input.service_id) {
+      return {
+        success: false,
+        requiresConfirmation: false,
+        reason: 'professional_id e service_id devem ser diferentes.',
+      }
+    }
+    const [professional, service] = await Promise.all([
+      db.professional.findFirst({
+        where: { id: input.professional_id!, tenantId: context.tenant.id },
+        select: { id: true },
+      }),
+      db.service.findFirst({
+        where: { id: input.service_id!, tenantId: context.tenant.id },
+        select: { id: true, durationMin: true },
+      }),
+    ])
+    if (!professional || !service) {
+      return {
+        success: false,
+        requiresConfirmation: false,
+        reason: 'Profissional ou serviço não encontrado. Use IDs de search_availability.',
+      }
+    }
+    const offersService = await db.professionalService.findUnique({
+      where: {
+        professionalId_serviceId: {
+          professionalId: input.professional_id!,
+          serviceId: input.service_id!,
+        },
+      },
+    })
+    if (!offersService) {
+      return {
+        success: false,
+        requiresConfirmation: false,
+        reason: 'Este profissional não oferece esse serviço.',
+      }
+    }
+    pendingAppointment = {
+      scheduledAt: input.scheduled_at!,
+      professionalId: input.professional_id!,
+      serviceId: input.service_id!,
+      durationMin: service.durationMin,
+    }
+  }
+
   // Idempotency — return existing pending charge
   const existing = await db.charge.findFirst({
     where: { contactId: context.contact.id, tenantId: context.tenant.id, status: 'PENDING' },
@@ -357,6 +431,9 @@ async function generatePix(
         chargeId: existing.id,
         amount: String(existing.amount),
         pixCopyPaste: existing.pixCopyPaste,
+        qrCodeUrl: existing.qrCodeBase64
+          ? `data:image/png;base64,${existing.qrCodeBase64}`
+          : null,
         alreadyExists: true,
       },
     }
@@ -366,7 +443,6 @@ async function generatePix(
     return { success: false, requiresConfirmation: false, reason: 'Integração Asaas não configurada' }
   }
 
-  // Validate against tenant max PIX amount
   const maxAmount = Number(context.tenant.maxPixAmount)
   if (input.amount > maxAmount) {
     return {
@@ -402,6 +478,7 @@ async function generatePix(
       pixCopyPaste: pixResponse.payload,
       qrCodeBase64: pixResponse.encodedImage,
       dueAt: new Date(pixResponse.expirationDate),
+      ...(pendingAppointment && { pendingAppointment }),
     },
   })
 

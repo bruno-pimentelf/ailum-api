@@ -46,15 +46,24 @@ scheduled_at: combine data + slot (ex: slot "09:00" e data 2026-03-10 → "2026-
   generate_pix: {
     name: 'generate_pix',
     description:
-      'Gera cobrança PIX para o contato via Asaas. Use após o agendamento ser confirmado e quando o pagamento for necessário.',
+      'Gera cobrança PIX para o contato via Asaas. Fluxo PIX-antes: use professional_id, service_id, scheduled_at — a consulta será criada apenas após pagamento. Fluxo normal: use appointment_id após create_appointment.',
     input_schema: Type.Object({
       amount: Type.Number({
         minimum: 1,
-        description: 'Valor da cobrança em BRL (ex: 150.00)',
+        description: 'Valor da cobrança em BRL (ex: 150.00). Use o price do serviço em professional.services ou availableServices.',
       }),
       description: Type.String({ description: 'Descrição da cobrança exibida ao paciente' }),
       appointment_id: Type.Optional(
-        Type.String({ format: 'uuid', description: 'UUID da consulta relacionada' }),
+        Type.String({ format: 'uuid', description: 'UUID da consulta já criada (fluxo normal)' }),
+      ),
+      professional_id: Type.Optional(
+        Type.String({ format: 'uuid', description: 'UUID do profissional — obrigatório no fluxo PIX-antes' }),
+      ),
+      service_id: Type.Optional(
+        Type.String({ format: 'uuid', description: 'UUID do serviço — obrigatório no fluxo PIX-antes' }),
+      ),
+      scheduled_at: Type.Optional(
+        Type.String({ format: 'date-time', description: 'Data/hora ISO 8601 (ex: 2026-03-16T13:00:00-03:00) — obrigatório no fluxo PIX-antes' }),
       ),
       due_hours: Type.Optional(
         Type.Number({

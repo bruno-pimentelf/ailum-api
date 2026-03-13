@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify'
+import { Prisma } from '../../generated/prisma/client.js'
 import { env } from '../../config/env.js'
 import { FirebaseSyncService } from '../../services/firebase-sync.service.js'
 import { getZapiConfig, sendText } from '../../services/zapi.service.js'
@@ -67,23 +68,74 @@ export async function asaasWebhookRoutes(fastify: FastifyInstance) {
         const paidAt = new Date()
 
         // Update charge
-        const updatedCharge = await fastify.db.charge.update({
+        let updatedCharge = await fastify.db.charge.update({
           where: { id: charge.id },
           data: { status: 'PAID', paidAt },
         })
 
-        // Update contact status
-        await fastify.db.contact.update({
-          where: { id: contact.id },
-          data: {
-            status: 'PAYMENT_CONFIRMED',
-            lastPaymentStatus: 'paid',
-            updatedAt: new Date(),
-          },
-        })
+        // PIX-antes: criar appointment após pagamento
+        const pending = charge.pendingAppointment as
+          | { scheduledAt: string; professionalId: string; serviceId: string; durationMin: number }
+          | null
+        if (pending) {
+          const scheduledAt = new Date(pending.scheduledAt)
+          const conflictEnd = new Date(
+            scheduledAt.getTime() + (pending.durationMin ?? 50) * 60_000,
+          )
+          const conflict = await fastify.db.appointment.findFirst({
+            where: {
+              professionalId: pending.professionalId,
+              status: { in: ['PENDING', 'CONFIRMED'] },
+              scheduledAt: { lt: conflictEnd },
+              AND: [
+                {
+                  scheduledAt: {
+                    gte: new Date(
+                      scheduledAt.getTime() - (pending.durationMin ?? 50) * 60_000,
+                    ),
+                  },
+                },
+              ],
+            },
+          })
+          if (!conflict) {
+            const appointment = await fastify.db.appointment.create({
+              data: {
+                tenantId,
+                contactId: contact.id,
+                professionalId: pending.professionalId,
+                serviceId: pending.serviceId,
+                scheduledAt,
+                durationMin: pending.durationMin ?? 50,
+                notes: null,
+                status: 'CONFIRMED',
+                createdBy: 'asaas_webhook',
+              },
+            })
+            updatedCharge = await fastify.db.charge.update({
+              where: { id: charge.id },
+              data: { appointmentId: appointment.id, pendingAppointment: Prisma.JsonNull },
+            })
+            await sync.syncAppointment(tenantId, {
+              id: appointment.id,
+              contactId: appointment.contactId,
+              professionalId: appointment.professionalId,
+              serviceId: appointment.serviceId,
+              scheduledAt: appointment.scheduledAt,
+              durationMin: appointment.durationMin,
+              status: appointment.status,
+              notes: appointment.notes,
+            })
+          } else {
+            fastify.log.warn(
+              { chargeId: charge.id, pending },
+              'asaas:webhook:slot_taken_after_payment',
+            )
+          }
+        }
 
-        // If charge is linked to an appointment, confirm it
-        if (charge.appointmentId) {
+        // Se charge já estava linkada a appointment (fluxo normal), confirmar
+        if (charge.appointmentId && !pending) {
           const updatedAppt = await fastify.db.appointment.update({
             where: { id: charge.appointmentId },
             data: { status: 'CONFIRMED' },
@@ -101,6 +153,29 @@ export async function asaasWebhookRoutes(fastify: FastifyInstance) {
           })
         }
 
+        // Mover para Consulta Agendada se existir
+        const stages = await fastify.db.stage.findMany({
+          where: { tenantId },
+          select: { id: true, name: true },
+        })
+        const consultaStage = stages.find(
+          (s) =>
+            s.name.toLowerCase().includes('consulta') && s.name.toLowerCase().includes('agendad'),
+        )
+
+        await fastify.db.contact.update({
+          where: { id: contact.id },
+          data: {
+            status: 'PAYMENT_CONFIRMED',
+            lastPaymentStatus: 'paid',
+            ...(consultaStage && {
+              currentStageId: consultaStage.id,
+              stageEnteredAt: new Date(),
+            }),
+            updatedAt: new Date(),
+          },
+        })
+
         // Sync charge + contact to Firestore
         await sync.syncCharge(tenantId, {
           id: updatedCharge.id,
@@ -117,7 +192,7 @@ export async function asaasWebhookRoutes(fastify: FastifyInstance) {
           tenantId,
           contactId: contact.id,
           status: 'PAYMENT_CONFIRMED',
-          stageId: contact.currentStageId,
+          stageId: consultaStage?.id ?? contact.currentStageId,
           lastMessageAt: new Date(),
         })
 

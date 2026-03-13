@@ -46,7 +46,11 @@ export async function runStageAgent(
   executeToolFn: (toolName: string, input: Record<string, unknown>) => Promise<ToolResult>,
 ): Promise<StageAgentResult> {
   const config = context.stage?.agentConfig
-  const allowedToolNames = config?.allowedTools ?? []
+  const rawAllowedTools = config?.allowedTools ?? []
+  const requirePaymentBefore = config?.requirePaymentBeforeConfirm ?? false
+  const allowedToolNames = requirePaymentBefore
+    ? rawAllowedTools.filter((t) => t !== 'create_appointment')
+    : rawAllowedTools
   const model = resolveModel(config?.model === 'HAIKU' ? 'haiku' : 'sonnet')
   const temperature = config?.temperature ?? 0.3
 
@@ -193,8 +197,8 @@ scheduled_at: ISO 8601 com -03:00. Data: ${context.currentDate} (hoje) ou data e
         allowedToolNames.includes('cancel_appointment')
           ? `REGRA cancel_appointment: Quando INTENÇÃO = WANTS_CANCEL e o contato especificou qual consulta cancelar, chame cancel_appointment IMEDIATAMENTE com appointment_id. NUNCA diga que cancelou sem ter chamado a tool.`
           : '',
-        config?.requirePaymentBeforeConfirm && allowedToolNames.includes('create_appointment') && allowedToolNames.includes('generate_pix')
-          ? `REGRA PIX OBRIGATÓRIO: Este stage exige pagamento PIX antes de confirmar. Após create_appointment, chame generate_pix IMEDIATAMENTE com appointment_id (retornado por create_appointment) e valor do serviço (use o price do serviço escolhido em availableServices ou professional.services). A consulta só é confirmada após o pagamento.`
+        requirePaymentBefore && allowedToolNames.includes('generate_pix')
+          ? `REGRA PIX ANTES DE AGENDAR: Este stage exige pagamento PIX ANTES de criar a consulta. NUNCA chame create_appointment. Quando INTENÇÃO = CONFIRMING e o contato escolher horário + profissional + serviço, chame generate_pix IMEDIATAMENTE com: professional_id, service_id, scheduled_at (ISO com -03:00), amount (price do serviço em professional.services ou availableServices), description. A consulta será criada automaticamente APENAS após o pagamento. Use IDs de search_availability ou PROFISSIONAIS DISPONÍVEIS HOJE.`
           : '',
         `REGRA WANTS_INFO + consultas: Quando INTENÇÃO = WANTS_INFO e o contato pedir ver/listar "minhas consultas", "meus agendamentos" ou similar, as consultas JÁ ESTÃO no bloco CONSULTAS AGENDADAS acima. Responda DIRETAMENTE listando-as (formato dia/hora + profissional + serviço). NUNCA diga "estamos verificando" — os dados estão no contexto. Se send_message estiver disponível, use-a para enviar a lista.`,
       ]
@@ -211,7 +215,8 @@ scheduled_at: ISO 8601 com -03:00. Data: ${context.currentDate} (hoje) ou data e
   const shouldForceToolUse =
     llmTools.length > 0 &&
     routing.confidence >= 0.7 &&
-    ((routing.intent === 'CONFIRMING' && allowedToolNames.includes('create_appointment')) ||
+    ((routing.intent === 'CONFIRMING' &&
+      (requirePaymentBefore ? allowedToolNames.includes('generate_pix') : allowedToolNames.includes('create_appointment'))) ||
       (routing.intent === 'WANTS_RESCHEDULE' && allowedToolNames.includes('reschedule_appointment')) ||
       (routing.intent === 'WANTS_CANCEL' && allowedToolNames.includes('cancel_appointment')))
 

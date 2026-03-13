@@ -1,9 +1,9 @@
 import { env } from '../config/env.js'
 
 const BASE_URL =
-  env.NODE_ENV === 'production'
-    ? 'https://api.asaas.com/v3'
-    : 'https://api-sandbox.asaas.com/v3'
+  env.ASAAS_USE_SANDBOX || env.NODE_ENV !== 'production'
+    ? 'https://api-sandbox.asaas.com/v3'
+    : 'https://api.asaas.com/v3'
 
 // ─── Response types ───────────────────────────────────────────────────────────
 

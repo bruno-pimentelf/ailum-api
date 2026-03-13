@@ -604,22 +604,23 @@ model Appointment {
 // ─────────────────────────────────────────────
 
 model Charge {
-  id              String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenantId        String       @db.Uuid
-  tenant          Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  contactId       String       @db.Uuid
-  contact         Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  appointmentId   String?      @unique @db.Uuid
-  asaasPaymentId  String?      @unique
-  amount          Decimal      @db.Decimal(10, 2)
-  description     String
-  status          ChargeStatus @default(PENDING)
-  pixCopyPaste    String?
-  qrCodeBase64    String?
-  dueAt           DateTime?    @db.Timestamptz
-  paidAt          DateTime?    @db.Timestamptz
-  createdAt       DateTime     @default(now()) @db.Timestamptz
-  updatedAt       DateTime     @updatedAt @db.Timestamptz
+  id               String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId         String       @db.Uuid
+  tenant           Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contactId        String       @db.Uuid
+  contact          Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  appointmentId    String?      @unique @db.Uuid
+  asaasPaymentId   String?      @unique
+  amount           Decimal      @db.Decimal(10, 2)
+  description      String
+  status           ChargeStatus @default(PENDING)
+  pixCopyPaste     String?
+  qrCodeBase64     String?
+  dueAt            DateTime?    @db.Timestamptz
+  paidAt           DateTime?    @db.Timestamptz
+  pendingAppointment Json?      /// Quando PIX antes de agendar: { scheduledAt, professionalId, serviceId, durationMin }
+  createdAt        DateTime     @default(now()) @db.Timestamptz
+  updatedAt        DateTime     @updatedAt @db.Timestamptz
 
   appointment Appointment?
 
