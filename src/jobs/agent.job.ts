@@ -1,9 +1,14 @@
 import { Worker } from 'bullmq'
 import type { FastifyInstance } from 'fastify'
 import { env } from '../config/env.js'
+import { agentQueue } from './queues.js'
 import { getEntryFunnelFirstStage } from '../modules/funnels/funnels.service.js'
 import { FirebaseSyncService } from '../services/firebase-sync.service.js'
 import { orchestrate } from '../modules/agent/orchestrator.js'
+
+const AGENT_LOCK_KEY_PREFIX = 'agent:lock:'
+const AGENT_LOCK_TTL_MS = 120_000 // 2 min max per run
+const AGENT_LOCK_DEFER_MS = 5000 // Re-queue delay when contact is busy
 
 export interface AgentJobData {
   tenantId: string
@@ -34,11 +39,24 @@ export function createAgentWorker(fastify: FastifyInstance) {
       }
 
       try {
-        // Se o contato não tem stage, atribui ao primeiro stage do funil de entrada (isDefault ou primeiro por order)
-        const contact = await fastify.db.contact.findUnique({
-          where: { id: contactId, tenantId },
-          select: { currentStageId: true },
-        })
+        // Evita execuções paralelas para o mesmo contato (ex.: usuário digita 2 mensagens rápidas)
+        const lockKey = `${AGENT_LOCK_KEY_PREFIX}${contactId}`
+        const acquired = await fastify.redis.set(lockKey, job.id!, 'PX', AGENT_LOCK_TTL_MS, 'NX')
+        if (!acquired) {
+          job.log(`[agent-job] contact busy, deferring job`)
+          await agentQueue.add('process-message', job.data, {
+            delay: AGENT_LOCK_DEFER_MS,
+            jobId: `agent:${contactId}:${Date.now()}`,
+          })
+          return { status: 'deferred', reason: 'contact_busy' }
+        }
+
+        try {
+          // Se o contato não tem stage, atribui ao primeiro stage do funil de entrada (isDefault ou primeiro por order)
+          const contact = await fastify.db.contact.findUnique({
+            where: { id: contactId, tenantId },
+            select: { currentStageId: true },
+          })
         if (contact && !contact.currentStageId) {
           const entry = await getEntryFunnelFirstStage(fastify.db, tenantId)
           if (entry) {
@@ -68,13 +86,16 @@ export function createAgentWorker(fastify: FastifyInstance) {
         }
 
         // A mensagem já foi salva pelo webhook antes de enfileirar — não salvar novamente
-        const result = await orchestrate(messageContent, contactId, tenantId, fastify, {
-          testMode: testMode ?? false,
-        })
+          const result = await orchestrate(messageContent, contactId, tenantId, fastify, {
+            testMode: testMode ?? false,
+          })
 
-        job.log(`[agent-job] status=${result.status} duration=${result.durationMs}ms`)
+          job.log(`[agent-job] status=${result.status} duration=${result.durationMs}ms`)
 
-        return result
+          return result
+        } finally {
+          await fastify.redis.del(lockKey).catch(() => {})
+        }
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : String(err)
 
