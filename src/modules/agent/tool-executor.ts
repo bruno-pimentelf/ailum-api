@@ -31,6 +31,7 @@ interface GeneratePixInput {
   service_id?: string
   scheduled_at?: string
   due_hours?: number
+  cpf?: string
 }
 
 interface MoveStageInput {
@@ -457,8 +458,20 @@ async function generatePix(
     .toISOString()
     .split('T')[0]!
 
+  const cpfDigits = input.cpf?.replace(/\D/g, '')
+  const cpfValid = cpfDigits && (cpfDigits.length === 11 || cpfDigits.length === 14)
+  if (!cpfValid) {
+    return {
+      success: false,
+      requiresConfirmation: false,
+      reason:
+        'O Asaas exige CPF ou CNPJ do cliente para criar a cobrança. Peça o CPF ao paciente e chame generate_pix novamente com o parâmetro cpf.',
+    }
+  }
+
   const pixResponse = await asaasCreatePixCharge(context.asaasIntegration.apiKey, {
     contactName: context.contact.name ?? context.contact.phone,
+    cpfCnpj: cpfDigits,
     phone: context.contact.phone,
     email: context.contact.email ?? undefined,
     value: input.amount,

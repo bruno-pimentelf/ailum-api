@@ -72,6 +72,12 @@ scheduled_at: combine data + slot (ex: slot "09:00" e data 2026-03-10 → "2026-
           description: 'Horas até o PIX expirar',
         }),
       ),
+      cpf: Type.Optional(
+        Type.String({
+          description:
+            'CPF do paciente (11 dígitos, com ou sem pontuação). OBRIGATÓRIO para gerar cobrança no Asaas. Peça ao paciente antes de chamar generate_pix.',
+        }),
+      ),
     }),
   },
 
